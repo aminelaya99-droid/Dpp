@@ -1,0 +1,55 @@
+name: بناء DPP لـ Windows
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: تثبيت المتطلبات
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: الاختبارات
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: اختبار الإقلاع
+        env:
+          QT_QPA_PLATFORM: offscreen
+          DPP_DATA_DIR: ${{ runner.temp }}\dpp-smoke
+        run: python -m dpp --smoke
+
+      - name: بناء exe
+        run: pyinstaller --noconfirm dpp.spec
+
+      - name: رفع الملف
+        uses: actions/upload-artifact@v4
+        with:
+          name: DPP-windows
+          path: dist/DPP
+          retention-days: 30
+
+      - name: ضغط للإصدار
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: Compress-Archive -Path dist/DPP -DestinationPath DPP-windows.zip
+
+      - name: إصدار
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DPP-windows.zip

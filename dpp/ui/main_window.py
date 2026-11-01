@@ -120,5 +120,20 @@ class MainWindow(QMainWindow):
             self.nav.setCurrentRow(idx)
         return page
 
+    def restart(self) -> None:
+        """إعادة الدخول بعد تغيير قاعدة البيانات كلياً (مسح/استعادة)."""
+        from PySide6.QtWidgets import QApplication
+        from dpp.app import start_session
+        from dpp.db import get_session
+        app = QApplication.instance()
+        app.setQuitOnLastWindowClosed(False)
+        self.hide()
+        win = start_session(get_session())
+        app.setQuitOnLastWindowClosed(True)
+        self.close()
+        self.deleteLater()
+        if win is None:
+            app.quit()
+
     def status(self, text: str) -> None:
         self.statusBar().showMessage(text, 6000)
