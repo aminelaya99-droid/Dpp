@@ -10,6 +10,7 @@
 - عند طلب بدء العمل على المشروع: طبّق skill **data-analysis-organizer** (فحص، تحليل، تنظيم، تقرير مشاكل وحلول).
 - قوالب الطباعة: استعمل skill **print-layout-expert**.
 - لغة التواصل: العربية (الدارجة الجزائرية مقبولة).
+- مستودعات School-app-2 و School-app-g برامج أخرى (React/Electron): **تُتجاهل تماماً**. DPP يُكتب من الصفر انطلاقاً من هذا الملف فقط.
 
 ## التقنية
 - تطبيق سطح مكتب Windows: **Python + PySide6 + SQLite** (SQLAlchemy)، openpyxl للإكسل، reportlab للطباعة/PDF، PyInstaller للتوزيع.
