@@ -17,5 +17,8 @@ def wipe_all(s, password: str):
     if path != ":memory:":
         for suffix in ("", "-journal", "-wal", "-shm"):
             Path(path + suffix).unlink(missing_ok=True)
-        shutil.rmtree(backups_dir(), ignore_errors=True)  # لا يُحفظ شيء
+        bdir = backups_dir()
+        shutil.rmtree(bdir, ignore_errors=True)  # لا يُحفظ شيء
+        if bdir.exists() and any(bdir.iterdir()):
+            raise OSError(f"تعذر حذف بعض النسخ الاحتياطية في {bdir} (ملف مفتوح؟)")
     return init_db(path)

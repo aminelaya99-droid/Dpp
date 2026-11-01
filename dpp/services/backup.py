@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import shutil
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from dpp.config import backups_dir, db_path
@@ -20,7 +21,8 @@ def create_backup(target_dir: Path | None = None, tag: str = "manual") -> Path:
     target_dir = Path(target_dir or backups_dir())
     target_dir.mkdir(parents=True, exist_ok=True)
     out = target_dir / f"dpp_{tag}_{dt.datetime.now():%Y%m%d_%H%M%S_%f}.sqlite3"
-    with sqlite3.connect(src) as a, sqlite3.connect(out) as b:
+    # closing: على Windows يبقى الملف مقفلاً ما دام الاتصال مفتوحاً
+    with closing(sqlite3.connect(src)) as a, closing(sqlite3.connect(out)) as b:
         a.backup(b)
     return out
 
@@ -33,7 +35,7 @@ def list_backups(target_dir: Path | None = None) -> list[Path]:
 def restore_backup(path: str | Path):
     """يستبدل قاعدة البيانات الحالية بالنسخة (بعد نسخة أمان للحالية) ويعيد فتحها."""
     path = Path(path)
-    with sqlite3.connect(path) as c:
+    with closing(sqlite3.connect(path)) as c:
         ok = c.execute("PRAGMA integrity_check").fetchone()[0]
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if ok != "ok" or "trainings" not in tables:
