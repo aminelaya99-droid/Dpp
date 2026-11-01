@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<timetable ascttversion="2023.10.1" importtype="database" options="idprefix:DPP,daynumbering1">
+  <periods options="canadd,export:silent" columns="period,name,short,starttime,endtime">
+    <period name="1" short="1" period="1" starttime="8:00" endtime="9:00"/>
+    <period name="2" short="2" period="2" starttime="9:00" endtime="10:00"/>
+    <period name="3" short="3" period="3" starttime="10:00" endtime="11:00"/>
+    <period name="4" short="4" period="4" starttime="11:00" endtime="12:00"/>
+    <period name="5" short="5" period="5" starttime="13:00" endtime="14:00"/>
+    <period name="6" short="6" period="6" starttime="14:00" endtime="15:00"/>
+    <period name="7" short="7" period="7" starttime="15:00" endtime="16:00"/>
+  </periods>
+  <daysdefs options="canadd,canremove,canupdate,silent" columns="id,days,name,short">
+    <daysdef id="D0" name="كل الأيام" short="X" days="10000,01000,00100,00010,00001"/>
+    <daysdef id="D1" name="الأحد" short="ح" days="10000"/>
+  </daysdefs>
+  <subjects options="canadd,export:silent" columns="id,name,short">
+    <subject id="S1" name="الطبوغرافيا" short="طبو"/>
+    <subject id="S2" name="اللغة الفرنسية" short="فر"/>
+    <subject id="S3" name="الاتصالات اللاسلكية" short="لاسلكي"/>
+    <subject id="S4" name="التربية البدنية" short="ت.ب"/>
+  </subjects>
+  <teachers options="canadd,export:silent" columns="id,firstname,lastname,name,short">
+    <teacher id="T1" firstname="محمد" lastname="بن علي" name="بن علي محمد" short="بع"/>
+    <teacher id="T2" firstname="محمد" lastname="قاسمي" name="قاسمي محمد" short="قم"/>
+    <teacher id="T3" firstname="" lastname="" name="سعيدي كريم" short="سك"/>
+  </teachers>
+  <classes options="canadd,export:silent" columns="id,name,short">
+    <class id="C1" name="BMP1-A" short="A"/>
+    <class id="C2" name="BMP1-B" short="B"/>
+  </classes>
+  <groups options="canadd,export:silent" columns="id,classid,name,entireclass">
+    <group id="G1" classid="C1" name="كامل القسم" entireclass="1"/>
+    <group id="G2" classid="C2" name="كامل القسم" entireclass="1"/>
+  </groups>
+  <lessons options="canadd,export:silent" columns="id,classids,groupids,subjectid,periodspercard,teacherids">
+    <lesson id="L1" classids="C1" groupids="G1" subjectid="S1" periodspercard="2" teacherids="T1" daysdefid="D0"/>
+    <lesson id="L2" classids="C2" groupids="G2" subjectid="S2" periodspercard="1" teacherids="T2"/>
+    <lesson id="L3" classids="C1,C2" groupids="G1,G2" subjectid="S4" periodspercard="2" teacherids="T3"/>
+    <lesson id="L4" classids="C2" groupids="G2" subjectid="S3" periodspercard="1" teacherids="T1"/>
+  </lessons>
+  <cards options="canadd,export:silent" columns="lessonid,period,days,weeks,classroomids">
+    <card lessonid="L1" period="1" days="10000" weeks="1"/>
+    <card lessonid="L2" period="1" days="10000" weeks="1"/>
+    <card lessonid="L2" period="2" days="10000" weeks="1"/>
+    <card lessonid="L3" period="5" days="01000" weeks="1"/>
+    <card lessonid="L4" period="3" days="00100" weeks="1"/>
+    <card lessonid="L1" period="1" days="00010" weeks="1"/>
+  </cards>
+</timetable>
