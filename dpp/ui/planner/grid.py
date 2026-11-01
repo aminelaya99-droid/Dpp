@@ -119,7 +119,7 @@ class PlannerGrid(QWidget):
     def metrics(self):
         z = self.zoom
         if self.m.mode == MAIN:
-            return dict(LHW=140, TH=46, LH=int(54 * min(1.4, max(0.8, z))), UW=26 * z)
+            return dict(LHW=140, TH=46, LH=int(54 * min(1.4, max(0.8, z))), UW=30 * z)
         if self.m.mode == DAYS_ROWS:
             uw = max(48 * z, (self.avail_w - 100) / max(1, self.m.nslots) * z)
             return dict(LHW=100, TH=26, LH=int(78 * min(1.4, max(0.8, z))), UW=uw)
@@ -396,7 +396,7 @@ class PlannerGrid(QWidget):
         p.setFont(f)
         p.setPen(fg)
         opt = QTextOption(Qt.AlignRight | Qt.AlignTop)
-        opt.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        opt.setWrapMode(QTextOption.WordWrap)
         opt.setTextDirection(Qt.RightToLeft)
         fm = p.fontMetrics()
         teacher_h = fm.height() if c.teacher else 0
