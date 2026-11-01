@@ -26,13 +26,22 @@ jobs:
       - name: الاختبارات
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
+        # النتيجة تُقرأ من تقرير JUnit: Qt قد ينهار أثناء إغلاق العملية في وضع offscreen
+        # على Windows بعد نجاح كل الاختبارات، فلا نعتمد على رمز الخروج وحده.
+        run: |
+          python -m pytest -q --junitxml=test-results.xml
+          Write-Host "pytest exit code: $LASTEXITCODE"
+          python ci/check_junit.py test-results.xml
 
       - name: اختبار الإقلاع
         env:
           QT_QPA_PLATFORM: offscreen
           DPP_DATA_DIR: ${{ runner.temp }}\dpp-smoke
-        run: python -m dpp --smoke
+        run: |
+          $out = (python -m dpp --smoke 2>&1 | Out-String)
+          Write-Host $out
+          if ($out -notmatch "SMOKE-OK") { exit 1 }
+          exit 0
 
       - name: بناء exe
         run: pyinstaller --noconfirm dpp.spec

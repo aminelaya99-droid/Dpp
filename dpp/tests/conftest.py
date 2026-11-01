@@ -28,17 +28,18 @@ def sample(session):
     return dict(training=t, level=lv, specialty=sp, a=a, b=b)
 
 
-_status = {"code": 0}
-
 
 def pytest_sessionfinish(session, exitstatus):
-    _status["code"] = int(exitstatus)
-
-
-def pytest_unconfigure(config):
-    """على Windows قد ينهار تفكيك كائنات Qt عند إغلاق المفسر بعد نجاح الاختبارات؛
-    نخرج مباشرة بنتيجة pytest الفعلية."""
-    import sys
-    if sys.platform.startswith("win"):
-        from dpp.app import hard_exit
-        hard_exit(_status["code"])
+    """تنظيف نوافذ Qt قبل إغلاق المفسر (يقلل انهيارات التفكيك على Windows)."""
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            for w in QApplication.topLevelWidgets():
+                w.close()
+                w.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            app.processEvents()
+    except Exception:  # noqa: BLE001
+        pass
