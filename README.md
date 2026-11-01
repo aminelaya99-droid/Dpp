@@ -1,0 +1,52 @@
+# DPP — برنامج تسيير الجداول الزمنية والتكوين
+
+تطبيق سطح مكتب لـ Windows (Python + PySide6 + SQLite) لتسيير التكوينات والجداول الأسبوعية والمقرر والتقدم،
+بواجهة عربية كاملة من اليمين إلى اليسار.
+
+## المتطلبات
+- Windows 10/11 (يعمل أيضاً على Linux/macOS)
+- Python 3.11 أو أحدث (https://www.python.org — فعّل خيار «Add Python to PATH» عند التثبيت)
+
+## التثبيت (Windows)
+افتح «موجه الأوامر» (cmd) داخل مجلد المشروع ثم:
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## التشغيل
+```bat
+.venv\Scripts\activate
+python -m dpp
+```
+عند أول تشغيل يطلب البرنامج إنشاء **حساب المسؤول** (اسم مستخدم وكلمة سر). كلمة السر تُخزن مشفرة (PBKDF2-SHA256).
+
+البيانات تُحفظ في `%APPDATA%\DPP\dpp.sqlite3` والنسخ الاحتياطية في `%APPDATA%\DPP\backups`.
+يمكن تغيير المجلد بمتغير البيئة `DPP_DATA_DIR`.
+
+## الاختبارات
+```bat
+python -m pytest -q
+```
+
+## بناء ملف exe
+```bat
+pip install pyinstaller
+pyinstaller dpp.spec
+```
+الملف الناتج في `dist\DPP\DPP.exe`. كما يبني GitHub Actions الملف تلقائياً عند كل push (انظر `.github/workflows/build-windows.yml`).
+
+## هيكل المشروع
+```
+dpp/
+  models/      جداول قاعدة البيانات (SQLAlchemy)
+  db/          الاتصال بقاعدة البيانات والبيانات الأولية
+  services/    منطق العمل: التعارضات، المقرر، التقدم، المجدول الآلي، النسخ الاحتياطي ...
+  importers/   استيراد ملفات aSc ‏(.roz) وقالب Excel للمقرر
+  printing/    قوالب الطباعة وتصدير PDF
+  ui/          الواجهة (PySide6)
+  tests/       اختبارات pytest
+docs/          القرارات (DECISIONS.md) والتقدم (PROGRESS.md)
+```
