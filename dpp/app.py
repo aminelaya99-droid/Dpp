@@ -61,6 +61,8 @@ def main(argv=None) -> int:
                 win.nav.setCurrentRow(i)
                 app.processEvents()
             print("SMOKE-OK", flush=True)
+            if sys.platform.startswith("win"):
+                os._exit(0)  # تفادي انهيار تفكيك Qt عند الخروج في وضع الاختبار
             app.quit()
         QTimer.singleShot(50, visit)
     code = app.exec()

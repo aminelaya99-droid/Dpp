@@ -76,7 +76,8 @@ def test_invalid_backup_rejected(tmp_path, monkeypatch):
     init_db(tmp_path / "dpp.sqlite3")
     bad = tmp_path / "bad.sqlite3"
     import sqlite3
-    with sqlite3.connect(bad) as c:
+    from contextlib import closing
+    with closing(sqlite3.connect(bad)) as c:
         c.execute("CREATE TABLE x (a)")
     with pytest.raises(ValueError):
         backup.restore_backup(bad)
