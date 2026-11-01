@@ -23,6 +23,18 @@ def create_app(argv=None) -> QApplication:
 _windows: list = []
 
 
+def hard_exit(code: int) -> None:
+    """خروج فوري للاختبارات على Windows: TerminateProcess يتخطى فك تحميل مكتبات Qt
+    (الذي قد ينهار في وضع offscreen) ويحتفظ برمز الخروج الصحيح."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if sys.platform.startswith("win"):
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.TerminateProcess(k32.GetCurrentProcess(), int(code))
+    os._exit(int(code))
+
+
 def start_session(s):
     """نافذة الدخول ثم النافذة الرئيسية (تُستعمل أيضاً بعد مسح البيانات أو الاستعادة)."""
     from dpp.ui.login import LoginDialog
@@ -62,7 +74,7 @@ def main(argv=None) -> int:
                 app.processEvents()
             print("SMOKE-OK", flush=True)
             if sys.platform.startswith("win"):
-                os._exit(0)  # تفادي انهيار تفكيك Qt عند الخروج في وضع الاختبار
+                hard_exit(0)  # تفادي انهيار تفكيك Qt عند الخروج في وضع الاختبار
             app.quit()
         QTimer.singleShot(50, visit)
     code = app.exec()

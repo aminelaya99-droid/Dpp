@@ -40,6 +40,5 @@ def pytest_unconfigure(config):
     نخرج مباشرة بنتيجة pytest الفعلية."""
     import sys
     if sys.platform.startswith("win"):
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os._exit(_status["code"])
+        from dpp.app import hard_exit
+        hard_exit(_status["code"])
