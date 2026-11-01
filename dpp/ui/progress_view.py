@@ -72,6 +72,8 @@ class ProgressPage(Page):
             w.setSizeAdjustPolicy(QComboBox.AdjustToContents)
             bar.addWidget(w)
         bar.addStretch(1)
+        from dpp.ui.widgets import button
+        bar.addWidget(button("طباعة تقرير التقدم", self.print_report))
         self.root.addLayout(bar)
         cards = QHBoxLayout()
         self.st = {}
@@ -186,6 +188,14 @@ class ProgressPage(Page):
             self.donuts.addWidget(d, i // cols, i % cols, Qt.AlignTop)
         self.donuts.setRowStretch(len(p.rows) // cols + 1, 1)
         self.donuts.setColumnStretch(cols, 1)
+
+    def print_report(self) -> None:
+        sid = self.section.currentData()
+        if not sid:
+            return
+        from dpp.printing.reports import preview_report, progress_report
+        sec = self.s.get(Section, sid)
+        preview_report(self, self.s, progress_report(self.s, sec, progress.section_progress(self.s, sec)))
 
     def _fill_summary(self) -> None:
         self.summary.setRowCount(0)
