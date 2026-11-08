@@ -86,12 +86,38 @@ DAILY = {
     "radius": "12px",
 }
 
+# د) DPP الحديثة (الافتراضي، الإصدار 1.7): Fluent + لوحة SaaS — قائمة جانبية داكنة مجمّعة،
+# شريط علوي بمسار تنقل وبحث وإشعارات، بطاقات بزوايا ناعمة وظلال خفيفة، والأخضر العسكري لون الهوية.
+COMMAND = {
+    "bg": "#F4F6FA", "surface": "#FFFFFF", "surface2": "#F8FAFC", "border": "#E2E8F0", "text": "#0E1726",
+    "muted": "#55657C", "accent": "#15803D", "accent_hover": "#166534", "accent_text": "#FFFFFF",
+    "cta": "#15803D", "cta_hover": "#166534", "focus": "#15803D",
+    "ribbon": "#0D1526", "ribbon_panel": "#FFFFFF", "ok": "#15803D", "warn": "#B45309", "bad": "#DC2626",
+    "sel": "#DCFCE7", "grid": "#E8EDF3", "header": "#F8FAFC",
+    "side_bg": "#0D1526", "side_text": "#C3CEDE", "side_muted": "#76859B", "side_active": "rgba(34,197,94,0.22)",
+    "side_active_text": "#FFFFFF", "side_hover": "rgba(255,255,255,0.07)", "side_border": "#0A101D",
+    "radius": "12px",
+}
+COMMAND_DARK = {
+    "bg": "#0B1220", "surface": "#121B2C", "surface2": "#162033", "border": "#24324A", "text": "#E8EEF7",
+    "muted": "#93A3BA", "accent": "#22C55E", "accent_hover": "#4ADE80", "accent_text": "#04140B",
+    "cta": "#22C55E", "cta_hover": "#4ADE80", "focus": "#4ADE80",
+    "ribbon": "#070D18", "ribbon_panel": "#121B2C", "ok": "#4ADE80", "warn": "#FBBF24", "bad": "#F87171",
+    "sel": "#14361F", "grid": "#1E2A3F", "header": "#101828",
+    "side_bg": "#070D18", "side_text": "#AFC0D6", "side_muted": "#7C8DA6", "side_active": "rgba(34,197,94,0.20)",
+    "side_active_text": "#FFFFFF", "side_hover": "rgba(255,255,255,0.06)", "side_border": "#05090F",
+    "radius": "12px",
+}
+
 PALETTES = {"office": OFFICE, "clean": LIGHT, "light": LIGHT, "dark": DARK, "teal": DARK, "graphite": GRAPHITE,
-            "ops": OPS, "ledger": LEDGER, "daily": DAILY}
+            "ops": OPS, "ledger": LEDGER, "daily": DAILY, "command": COMMAND, "command_dark": COMMAND_DARK}
 # اللوحة الافتراضية لكل نمط واجهة (عند اختيار «حسب النمط»)
 STYLE_THEME = {"office": "office", "teal": "dark", "clean": "clean", "focus": "graphite",
-               "ops": "ops", "ledger": "ledger", "daily": "daily"}
-NEW_STYLES = ("ops", "ledger", "daily")
+               "ops": "ops", "ledger": "ledger", "daily": "daily", "command": "command"}
+NEW_STYLES = ("ops", "ledger", "daily", "command")
+# لكل نمط حديث: (لوحته الفاتحة، لوحته الداكنة) — يستعملها «تلقائي» و«فاتح/داكن»
+STYLE_PAIR = {"ops": ("ledger", "ops"), "ledger": ("ledger", "ops"), "daily": ("daily", "ops"),
+              "command": ("command", "command_dark")}
 THEME_MODES = [("style", "حسب نمط الواجهة"), ("auto", "تلقائي حسب Windows"), ("light", "فاتح"),
                ("dark", "داكن (أخضر بترولي)"), ("graphite", "رمادي داكن")]
 FONTS = [("Almarai", "Almarai"), ("Tajawal", "Tajawal"), ("Cairo", "Cairo")]
@@ -113,13 +139,13 @@ def resolve(mode: str, style: str | None = None) -> str:
     if mode in ("style", "", None):
         return STYLE_THEME.get(style, "clean")
     if style in NEW_STYLES:
-        light = "ledger" if style in ("ops", "ledger") else "daily"
+        light, dark = STYLE_PAIR.get(style, ("ledger", "ops"))
         if mode == "auto":
-            return "ops" if system_is_dark() else light
+            return dark if system_is_dark() else light
         if mode == "light":
             return light
         if mode in ("dark", "graphite"):
-            return "ops"
+            return dark
         return STYLE_THEME.get(style, "ledger")
     if mode == "auto":
         return "dark" if system_is_dark() else ("office" if style == "office" else "clean")
@@ -320,6 +346,22 @@ def stylesheet(t: dict) -> str:
         color: {t['text']}; }}
     QToolButton#DayTab:checked {{ background: {t['accent']}; color: {t['accent_text']}; border-color: {t['accent']};
         font-weight: bold; }}
+    /* ---------- الواجهة د: DPP الحديثة — الشريط العلوي ---------- */
+    QLabel#Crumb {{ color: {t['muted']}; font-size: 9pt; }}
+    QLabel#Crumb[cur="1"] {{ color: {t['text']}; font-weight: bold; }}
+    QToolButton#HeadIcon {{ border: 1px solid {t['border']}; border-radius: 10px; padding: 6px;
+        background: {t['surface']}; }}
+    QToolButton#HeadIcon:hover {{ background: {t['surface2']}; border-color: {t['accent']}; }}
+    QLabel#HeadBadge {{ background: {t['bad']}; color: white; border-radius: 8px; font-size: 8pt;
+        font-weight: bold; padding: 0 4px; min-width: 9px; }}
+    QToolButton#UserChip {{ border: 1px solid {t['border']}; border-radius: 10px; padding: 3px 10px 3px 6px;
+        background: {t['surface']}; color: {t['text']}; font-weight: bold; }}
+    QToolButton#UserChip:hover {{ border-color: {t['accent']}; }}
+    QToolButton#UserChip::menu-indicator {{ width: 0; }}
+    QLabel#Avatar {{ background: {t['accent']}; color: {t['accent_text']}; border-radius: 9px;
+        font-weight: bold; font-size: 9pt; }}
+    QFrame#HeadSep {{ background: {t['border']}; max-width: 1px; min-width: 1px; margin: 6px 2px; }}
+
     {_style_extra(t)}
 
     #FocusBar {{ background: #24262A; border-bottom: 1px solid #16171A; }}
@@ -359,6 +401,31 @@ def _style_extra(t: dict) -> str:
         out += f"""
     QPushButton#NavItem[collapsed="1"] {{ padding: 10px 4px; border-radius: 10px; }}
     QPushButton#Primary, QPushButton#Cta {{ color: {t['accent_text']}; }}
+    """
+    if t is COMMAND or t is COMMAND_DARK:
+        out += f"""
+    QFrame#Card {{ border-radius: 14px; }}
+    QFrame#Card:hover {{ border-color: {t['border']}; }}
+    QLabel#CardValue {{ font-size: 20pt; color: {t['text']}; }}
+    QPushButton {{ border-radius: 10px; padding: 7px 14px; }}
+    QPushButton#Primary, QPushButton#Cta {{ border-radius: 10px; }}
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit {{ border-radius: 10px; padding: 7px 10px; }}
+    QGroupBox {{ border-radius: 14px; margin-top: 16px; padding-top: 12px; }}
+    QGroupBox::title {{ padding: 0 10px; }}
+    QTableView, QTreeView, QListView, QTableWidget {{ border-radius: 12px; }}
+    QHeaderView::section {{ background: {t['header']}; color: {t['muted']}; border-left: none;
+        border-bottom: 1px solid {t['border']}; padding: 8px 10px; }}
+    QPushButton#NavItem {{ border-radius: 10px; padding: 9px 12px; }}
+    QPushButton#NavItem:checked {{ border-right: 3px solid {t['accent']}; }}
+    #ModernSide QLabel#NavGroup {{ padding: 15px 12px 5px 0; letter-spacing: 0.4px; }}
+    #ContentHeader {{ background: {t['surface']}; border-bottom: 1px solid {t['border']}; }}
+    QLabel#HeaderTitle {{ font-size: 14.5pt; }}
+    #ContentHeader QLineEdit {{ border-radius: 10px; min-width: 260px; background: {t['surface2']};
+        border: 1px solid {t['border']}; }}
+    #ContentHeader QComboBox {{ border-radius: 10px; }}
+    #ContentHeader QToolButton {{ border-radius: 10px; }}
+    QTabBar::tab {{ padding: 8px 16px; }}
+    #TrayPanel, #InfoPanel, #GridToolbar {{ border-radius: 14px; }}
     """
     return out
 

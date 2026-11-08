@@ -1,4 +1,7 @@
-"""أنماط الواجهة الأربعة (تختلف في تنظيم النافذة، لا في اللون فقط):
+"""أنماط الواجهة (تختلف في تنظيم النافذة، لا في اللون فقط):
+
+* command «DPP الحديثة» (الافتراضي منذ 1.7): قائمة جانبية داكنة مجمّعة قابلة للطيّ بأيقونات ومؤشر نشط،
+  وشريط علوي فيه مسار التنقل وعنوان الصفحة والبحث السريع ومركز الإشعارات وبطاقة المستخدم.
 
 * office «Office فاتح»: شريط أوامر Ribbon بتبويبات ومجموعات، خلفية فاتحة، لوحة صفحات جانبية بسيطة.
 * teal   «عصري داكن» (الافتراضي): قائمة جانبية داكنة مجمّعة (الجدولة / البيانات / المتابعة / النظام) بشارات،
@@ -14,8 +17,9 @@ from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, 
 
 from .widgets import icon
 
-# الواجهات الثلاث (الإصدار 1.4) — تُختار من الإعدادات ← المظهر
-STYLES = [("ops", "أ — غرفة العمليات (داكن، قائمة أيقونات)"), ("ledger", "ب — السجل (فاتح، شكل الورقة المطبوعة)"),
+# الواجهات المتاحة — تُختار من الإعدادات ← المظهر (الأولى هي الافتراضية)
+STYLES = [("command", "DPP الحديثة (افتراضي)"),
+          ("ops", "أ — غرفة العمليات (داكن، قائمة أيقونات)"), ("ledger", "ب — السجل (فاتح، شكل الورقة المطبوعة)"),
           ("daily", "ج — يوم بيوم (فاتح، تنقل علوي)")]
 # الأنماط السابقة تبقى صالحة (للقواعد القديمة والاختبارات) لكنها لا تُعرض في القائمة
 OLD_STYLES = [("office", "Office فاتح (Ribbon)"), ("teal", "عصري داكن (أخضر بترولي)"),
@@ -26,9 +30,12 @@ LEGACY_STYLES = {"modern": "teal", "classic": "office"}
 UPGRADE = {"teal": "ops", "focus": "ops", "clean": "ledger", "office": "daily"}
 
 
+DEFAULT_STYLE = "command"
+
+
 def normalize_style(style: str | None) -> str:
-    style = LEGACY_STYLES.get(style or "", style or "ops")
-    return style if style in dict(ALL_STYLES) else "ops"
+    style = LEGACY_STYLES.get(style or "", style or DEFAULT_STYLE)
+    return style if style in dict(ALL_STYLES) else DEFAULT_STYLE
 
 NAV_GROUPS = [
     ("الجدولة", ["master", "planner", "weeks", "dashboard"]),
@@ -210,25 +217,110 @@ class ModernSidebar(QFrame):
 
 
 class ContentHeader(QFrame):
-    """رأس الصفحة في النمط العصري: العنوان + البحث + أزرار سريعة."""
+    """رأس الصفحة: مسار التنقل + العنوان + البحث + مركز الإشعارات + بطاقة المستخدم.
+
+    مسار التنقل والإشعارات والمستخدم تظهر في نمط «DPP الحديثة» فقط (set_rich)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ContentHeader")
         self.h = QHBoxLayout(self)
         self.h.setContentsMargins(14, 8, 14, 8)
+        self.h.setSpacing(10)
+        tv = QVBoxLayout()
+        tv.setSpacing(0)
+        self.crumb_box = QWidget()
+        cb = QHBoxLayout(self.crumb_box)
+        cb.setContentsMargins(0, 0, 0, 2)
+        cb.setSpacing(5)
+        self.crumb_labels: list[QLabel] = []
+        for i in range(5):
+            lab = QLabel()
+            lab.setObjectName("Crumb")
+            lab.hide()
+            cb.addWidget(lab)
+            self.crumb_labels.append(lab)
+        cb.addStretch()
+        self.crumb_box.hide()
+        tv.addWidget(self.crumb_box)
         self.title = QLabel()
         self.title.setObjectName("HeaderTitle")
         self.sub = QLabel()
         self.sub.setObjectName("Muted")
-        tv = QVBoxLayout()
-        tv.setSpacing(0)
         tv.addWidget(self.title)
         tv.addWidget(self.sub)
         self.h.addLayout(tv)
         self.h.addStretch()
         self.slot = QHBoxLayout()     # يُنقل إليه البحث واختيار التكوين
         self.h.addLayout(self.slot)
+        # مركز الإشعارات
+        self.bell = QToolButton()
+        self.bell.setObjectName("HeadIcon")
+        self.bell.setToolTip("مركز الإشعارات")
+        self.bell.setCursor(Qt.PointingHandCursor)
+        self.bell.setPopupMode(QToolButton.InstantPopup)
+        self.bell_badge = QLabel(self.bell)
+        self.bell_badge.setObjectName("HeadBadge")
+        self.bell_badge.setAlignment(Qt.AlignCenter)
+        self.bell_badge.hide()
+        self.h.addWidget(self.bell)
+        self.sep = QFrame()
+        self.sep.setObjectName("HeadSep")
+        self.h.addWidget(self.sep)
+        # بطاقة المستخدم
+        self.user_btn = QToolButton()
+        self.user_btn.setObjectName("UserChip")
+        self.user_btn.setCursor(Qt.PointingHandCursor)
+        self.user_btn.setPopupMode(QToolButton.InstantPopup)
+        self.user_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.user_btn.setIconSize(QSize(20, 20))
+        self.h.addWidget(self.user_btn)
+        self.set_rich(False)
+
+    def set_rich(self, on: bool):
+        """إظهار مسار التنقل والإشعارات والمستخدم (نمط DPP الحديثة)."""
+        self.rich = on
+        self.crumb_box.setVisible(on and any(l.isVisible() for l in self.crumb_labels))
+        for w in (self.bell, self.sep, self.user_btn):
+            w.setVisible(on)
+
+    def set_crumbs(self, parts: list[str]):
+        """مسار مثل: DPP ‹ الجدولة ‹ الجدول العام."""
+        items: list[str] = []
+        for i, p in enumerate(parts[:5]):
+            items.append(p)
+        for i, lab in enumerate(self.crumb_labels):
+            if i < len(items):
+                last = i == len(items) - 1
+                lab.setText(items[i] if last else f"{items[i]}  ‹")
+                lab.setProperty("cur", "1" if last else "0")
+                lab.style().unpolish(lab)
+                lab.style().polish(lab)
+                lab.show()
+            else:
+                lab.hide()
+        self.crumb_box.setVisible(bool(items) and getattr(self, "rich", False))
+
+    def set_user(self, name: str):
+        from . import theme
+        self.user_btn.setText(f" {name}" if name else "")
+        self.user_btn.setIcon(icon("mdi6.account-circle", theme.CURRENT["accent"]))
+        self.user_btn.setToolTip(f"المستخدم: {name}" if name else "المستخدم")
+
+    def set_notifications(self, n: int):
+        if n:
+            self.bell_badge.setText(str(n) if n < 100 else "99+")
+            self.bell_badge.adjustSize()
+            self.bell_badge.move(2, 2)
+            self.bell_badge.show()
+            self.bell_badge.raise_()
+        else:
+            self.bell_badge.hide()
+
+    def recolor(self):
+        from . import theme
+        t = theme.CURRENT
+        self.bell.setIcon(icon("mdi6.bell-outline", t["text"]))
 
 
 class TopNav(QFrame):

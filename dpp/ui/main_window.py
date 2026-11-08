@@ -14,8 +14,8 @@ from ..services import backup as B
 from ..services import calendar as C
 from . import theme
 from .context import AppContext
-from .shell import (ALL_STYLES, STYLES, UPGRADE, CommandPalette, ContentHeader, FocusBar, ModernSidebar, TopNav,
-                    normalize_style)
+from .shell import (ALL_STYLES, DEFAULT_STYLE, NAV_GROUPS, STYLES, UPGRADE, CommandPalette, ContentHeader,
+                    FocusBar, ModernSidebar, TopNav, normalize_style)
 from .pages.absences import AbsencesPage
 from .pages.calendar_page import CalendarPage
 from .pages.dashboard import DashboardPage
@@ -171,6 +171,8 @@ class MainWindow(QMainWindow):
         cv.setContentsMargins(0, 0, 0, 0)
         cv.setSpacing(0)
         self.header = ContentHeader(self)
+        self.header.bell.setMenu(self._notif_menu())
+        self.header.user_btn.setMenu(self._user_menu())
         cv.addWidget(self.header)
         # الصفحات داخل منطقة تمرير: صفحة عريضة لا تدفع النافذة أوسع من الشاشة (فتختفي القائمة الجانبية)
         from PySide6.QtWidgets import QScrollArea
@@ -202,7 +204,11 @@ class MainWindow(QMainWindow):
             old = normalize_style(ctx.db.get_setting("ui_style", "teal"))
             ctx.db.set_setting("ui_style", UPGRADE.get(old, old))
             ctx.db.set_setting("ui_style_v14", "1")
-        self.apply_style(ctx.db.get_setting("ui_style", "ops"), save=False)
+        # الإصدار 1.7: «DPP الحديثة» تصبح الواجهة الافتراضية مرة واحدة (الواجهات أ/ب/ج تبقى متاحة)
+        if ctx.db.get_setting("ui_style_v17", "") != "1":
+            ctx.db.set_setting("ui_style", DEFAULT_STYLE)
+            ctx.db.set_setting("ui_style_v17", "1")
+        self.apply_style(ctx.db.get_setting("ui_style", DEFAULT_STYLE), save=False)
         self.side.setCurrentRow(0)
         self.badge_timer = QTimer(self)
         self.badge_timer.timeout.connect(self.update_badges)
@@ -508,6 +514,7 @@ class MainWindow(QMainWindow):
         self.modern_side.set_current(key)
         self.top_nav.set_current(key)
         self._current = key
+        self._set_crumbs(key)
         for i in range(self.side.count()):
             if self.side.item(i).data(Qt.UserRole) == key and self.side.currentRow() != i:
                 self.side.blockSignals(True)
@@ -661,6 +668,8 @@ class MainWindow(QMainWindow):
                       (self.side_btn, "mdi6.page-layout-sidebar-right")):
             b.setIcon(icon(ic, col))
         self.focus_bar.palette_btn.setIcon(icon("mdi6.console-line", "#E6E9ED"))
+        self.header.recolor()
+        self.header.set_user(str(getattr(self.ctx.db, "current_user", "") or ""))
         self.modern_side.recolor()
         icons = {k: ic for k, _, ic in PAGES}
         for i in range(self.side.count()):
@@ -675,7 +684,7 @@ class MainWindow(QMainWindow):
             self.ctx.db.set_setting("ui_style", style)
         self.app.setProperty("ui_style", style)
         office, focus, daily = style == "office", style == "focus", style == "daily"
-        sidebar = style in ("teal", "clean", "ops", "ledger")
+        sidebar = style in ("teal", "clean", "ops", "ledger", "command")
         self.ribbon.setVisible(office)
         self.focus_bar.setVisible(focus)
         self.top_nav.setVisible(daily)
@@ -685,9 +694,10 @@ class MainWindow(QMainWindow):
         # الواجهة أ: قائمة أيقونات ضيقة دائماً
         if style == "ops":
             self.modern_side.set_collapsed(True, emit=False)
-        elif style in ("ledger", "teal", "clean"):
+        elif style in ("ledger", "teal", "clean", "command"):
             self.modern_side.set_collapsed(self.ctx.db.get_setting("side_collapsed", "0") == "1", emit=False)
         self.modern_side.collapse_btn.setVisible(style != "ops")
+        self.header.set_rich(style == "command")
         # نقل البحث واختيار التكوين وأزرار المظهر إلى شريط النمط الحالي
         target = (self.header.slot if sidebar else self.top_nav.slot if daily
                   else (self.focus_bar.slot if focus else self.ribbon.top_l))
@@ -695,6 +705,8 @@ class MainWindow(QMainWindow):
             target.addWidget(w)
         self.side_btn.setVisible(office)
         self.apply_theme()
+        if hasattr(self, "_current"):
+            self._set_crumbs(self._current)
         master = getattr(self, "pages", {}).get("master")
         if master is not None and hasattr(master, "apply_ui_style"):
             master.apply_ui_style(style)
@@ -706,7 +718,7 @@ class MainWindow(QMainWindow):
         self.apply_style(keys[(keys.index(cur) + 1) % len(keys)])
 
     def toggle_side(self):
-        if self.ui_style in ("teal", "clean", "ledger", "ops"):
+        if self.ui_style in ("teal", "clean", "ledger", "ops", "command"):
             self.modern_side.set_collapsed(not self.modern_side.collapsed)
         elif self.ui_style == "office":
             self.side.setVisible(not self.side.isVisible())
@@ -725,6 +737,78 @@ class MainWindow(QMainWindow):
         p.move(g.center().x() - p.width() // 2, g.y() + 90)
         p.exec()
 
+    # ------------------------------------------------------------- الشريط العلوي
+    def _set_crumbs(self, key: str):
+        """مسار التنقل: DPP ‹ المجموعة ‹ الصفحة."""
+        titles = {k: t for k, t, _ in PAGES}
+        group = next((g for g, keys in NAV_GROUPS if key in keys), "")
+        parts = ["DPP"] + ([group] if group else []) + [titles.get(key, "")]
+        self.header.set_crumbs([p for p in parts if p])
+
+    def _notif_menu(self):
+        from PySide6.QtWidgets import QMenu
+        m = QMenu(self)
+        m.aboutToShow.connect(lambda: self._fill_notifs(m))
+        return m
+
+    def _fill_notifs(self, m):
+        """مركز الإشعارات: تعارضات الأسبوعين، تذكيرات الرزنامة، التنبيهات المفتوحة."""
+        from ..services import alerts as AL
+        from ..services import conflicts as CF
+        from ..utils import week_start
+        m.clear()
+        n = 0
+        try:
+            ws = week_start(date.today())
+            conf = CF.active_conflicts(self.ctx.db, ws, ws + timedelta(days=13))
+        except Exception:
+            conf = []
+        if conf:
+            m.addSection(f"التعارضات ({len(conf)})")
+            for c in conf[:6]:
+                txt = c.get("text") or c.get("title") or c.get("kind") or "تعارض"
+                m.addAction(icon("mdi6.alert-outline", theme.CURRENT["bad"]), str(txt)[:90],
+                            lambda: self.navigate("master"))
+            n += len(conf)
+        try:
+            rem = C.due_reminders(self.ctx.db)
+        except Exception:
+            rem = []
+        if rem:
+            m.addSection(f"تذكيرات الرزنامة ({len(rem)})")
+            for r in rem[:6]:
+                m.addAction(icon("mdi6.calendar-clock", theme.CURRENT["warn"]), str(r.get("title", ""))[:90],
+                            lambda: self.navigate("calendar"))
+            n += len(rem)
+        try:
+            al = AL.open_alerts(self.ctx.db)
+        except Exception:
+            al = []
+        if al:
+            m.addSection(f"تنبيهات ({len(al)})")
+            for a in al[:6]:
+                m.addAction(icon("mdi6.information-outline", theme.CURRENT["muted"]), str(a.get("title", ""))[:90],
+                            lambda: self.navigate("progress"))
+            n += len(al)
+        if not n:
+            act = m.addAction(icon("mdi6.check-circle-outline", theme.CURRENT["ok"]), "لا توجد إشعارات")
+            act.setEnabled(False)
+
+    def _user_menu(self):
+        from PySide6.QtWidgets import QMenu
+        m = QMenu(self)
+        m.addAction(icon("mdi6.cog-outline"), "الإعدادات", lambda: self.navigate("settings"))
+        m.addAction(icon("mdi6.theme-light-dark"), "تبديل الوضع الفاتح/الداكن", self.toggle_theme)
+        sm = m.addMenu(icon("mdi6.palette-swatch-outline"), "نمط الواجهة")
+        for k, lab in STYLES:
+            sm.addAction(lab, lambda k=k: self.apply_style(k))
+        m.addSeparator()
+        m.addAction(icon("mdi6.content-save-move-outline"), "نسخة احتياطية الآن", self.backup_now)
+        m.addAction(icon("mdi6.console-line"), "لوحة الأوامر  Ctrl+K", self.command_palette)
+        m.addSeparator()
+        m.addAction(icon("mdi6.information-outline"), "حول DPP", self.about)
+        return m
+
     def update_badges(self):
         try:
             from ..services import conflicts as CF
@@ -738,6 +822,12 @@ class MainWindow(QMainWindow):
                                     (date.today().isoformat(), date.today().isoformat()), 0)
             self.modern_side.buttons["absences"].set_badge(ab, warn=False)
             self.modern_side.user.setText(f"المستخدم: {self.ctx.db.current_user}")
+            try:
+                from ..services import alerts as AL
+                self.header.set_notifications(n + rem + AL.count_open(self.ctx.db))
+            except Exception:
+                self.header.set_notifications(n + rem)
+            self.header.set_user(str(self.ctx.db.current_user or ""))
             if getattr(self, "_current", "") == "master" and "master" in self.pages:
                 g = self.pages["master"].grid
                 from ..services.grid import week_number
