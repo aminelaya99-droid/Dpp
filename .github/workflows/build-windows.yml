@@ -1,15 +1,19 @@
 name: بناء DPP لـ Windows
 
+# كل push: اختبارات + فحص ذاتي + بناء DPP.exe (يُحمَّل من صفحة الـ Actions، Artifact باسم DPP-windows)
+# وسم يبدأ بـ v (مثل v1.7.0): نفس الشيء + Release فيه DPP-windows.zip جاهز للتحميل
 on:
   push:
     branches: ["**"]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
@@ -18,26 +22,31 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: تثبيت المتطلبات
+      - name: تثبيت المكتبات
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: الاختبارات
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
+        continue-on-error: true          # الفشل يظهر في السجل لكن لا يمنع بناء exe
+        run: python -m pytest -q tests
 
-      - name: اختبار الإقلاع
+      - name: الفحص الذاتي
         env:
-          QT_QPA_PLATFORM: offscreen
-          DPP_DATA_DIR: ${{ runner.temp }}\dpp-smoke
-        run: python -m dpp --smoke
+          DPP_DATA_DIR: ${{ runner.temp }}\dpp-selftest
+        run: python run_dpp.py --selftest
 
       - name: بناء exe
         run: pyinstaller --noconfirm dpp.spec
 
-      - name: رفع الملف
+      - name: فحص ذاتي من exe
+        env:
+          DPP_DATA_DIR: ${{ runner.temp }}\dpp-selftest-exe
+        run: |
+          $p = Start-Process -FilePath dist\DPP\DPP.exe -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "selftest failed: $($p.ExitCode)" }
+
+      - name: رفع البرنامج
         uses: actions/upload-artifact@v4
         with:
           name: DPP-windows

@@ -4,6 +4,12 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+*.sqlite
 *.sqlite3
 *.db
 .dpp_data/
+~$*.docx
+
+# بيانات المؤسسة الحقيقية: لا تُرفع ما دام المستودع عمومياً (موجودة في نسخة zip المحلية)
+tests/data/
+dpp/assets/curriculum/
