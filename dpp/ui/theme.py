@@ -390,6 +390,11 @@ def stylesheet(t: dict) -> str:
         color: {t['text']}; }}
     QToolButton#DayTab:checked {{ background: {t['accent']}; color: {t['accent_text']}; border-color: {t['accent']};
         font-weight: bold; }}
+    /* ---------- الحالة الفارغة ---------- */
+    QFrame#EmptyState {{ background: transparent; border: 1px dashed {t['border']}; border-radius: 12px; }}
+    QLabel#EmptyIcon {{ background: {t['surface2']}; border-radius: 14px; }}
+    QLabel#EmptyTitle {{ font-size: 11.5pt; font-weight: bold; color: {t['text']}; }}
+
     /* ---------- أقسام الإعدادات ---------- */
     QListWidget#SettingsNav {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: 12px;
         padding: 6px; outline: 0; }}
