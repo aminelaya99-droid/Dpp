@@ -143,7 +143,9 @@ def run() -> int:
         print(text)
     except Exception:
         pass
-    if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+    # نافذة النتيجة لمن يشغّل الفحص بنقرة مزدوجة فقط؛ في CI أو بلا شاشة تبقى نافذة
+    # حوار منتظرة للأبد فتُعلّق البناء.
+    if os.environ.get("QT_QPA_PLATFORM") != "offscreen" and not os.environ.get("CI"):
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(None, "DPP — الفحص الذاتي", text)
     return 0 if ok else 1

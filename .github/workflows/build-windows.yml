@@ -11,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONIOENCODING: utf-8
@@ -40,13 +41,17 @@ jobs:
         run: pyinstaller --noconfirm dpp.spec
 
       - name: فحص ذاتي من exe
+        timeout-minutes: 6          # exe معلّق لا يجب أن يوقف البناء ساعات
         env:
           DPP_DATA_DIR: ${{ runner.temp }}\dpp-selftest-exe
         run: |
           $p = Start-Process -FilePath dist\DPP\DPP.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-ChildItem -Path $env:TEMP -Filter "selftest_report.txt" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Encoding UTF8
           if ($p.ExitCode -ne 0) { throw "selftest failed: $($p.ExitCode)" }
 
       - name: رفع البرنامج
+        if: always()                # الملف التنفيذي يُرفع حتى لو فشل الفحص، ليُجرَّب يدوياً
         uses: actions/upload-artifact@v4
         with:
           name: DPP-windows
