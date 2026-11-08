@@ -67,3 +67,49 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: DPP-windows.zip
+
+  # النسخة الخفيفة لويندوز 7 (32 بت): Python 3.8 + PySide2 (Qt 5)، بلا OR-Tools
+  lite:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+          architecture: "x86"
+
+      - name: تثبيت المكتبات
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lite.txt pyinstaller==5.13.2
+
+      - name: الفحص الذاتي
+        env:
+          DPP_DATA_DIR: ${{ runner.temp }}\dpp-lite-selftest
+        run: python run_dpp_lite.py --selftest
+
+      - name: بناء exe
+        run: pyinstaller --noconfirm dpp_lite.spec
+
+      - name: فحص ذاتي من exe
+        timeout-minutes: 6
+        env:
+          DPP_DATA_DIR: ${{ runner.temp }}\dpp-lite-exe
+        run: |
+          $p = Start-Process -FilePath dist\DPP-Lite\DPP-Lite.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-ChildItem -Path $env:TEMP -Filter "selftest_report.txt" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Encoding UTF8
+          if ($p.ExitCode -ne 0) { throw "lite selftest failed: $($p.ExitCode)" }
+
+      - name: رفع النسخة الخفيفة
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DPP-Lite-win7-x86
+          path: dist/DPP-Lite
+          retention-days: 30

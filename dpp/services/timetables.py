@@ -1,6 +1,8 @@
 """الجداول والحصص: الحفظ، الاعتماد، النسخ، التعديل اليدوي، فحص التعارضات، التخطيط الكامل."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import json
 import math
 from collections import defaultdict
@@ -8,7 +10,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from ..db.database import Database
-from ..scheduler.engine import ScheduleResult, Scheduler
+if TYPE_CHECKING:                       # الاستيراد كسول: محرك OR-Tools ثقيل وغير متوفر
+    from ..scheduler.engine import ScheduleResult, Scheduler   # noqa: F401
 from ..utils import STATUS_LABELS, hm, iso, to_date, week_days, week_start, weeks_between
 from .calendar import blocked_dates, teaching_days
 
@@ -322,6 +325,7 @@ def plan_period(db: Database, formation_id: int, start=None, end=None, time_limi
     start_d = to_date(start or f["start_date"])
     out = PeriodPlan()
     carry: dict[int, float] = defaultdict(float)
+    from ..scheduler.engine import Scheduler
     sched = Scheduler(db, time_limit=time_limit)
     weeks = sorted(plan)
     for i, w in enumerate(weeks):
@@ -334,6 +338,7 @@ def plan_period(db: Database, formation_id: int, start=None, end=None, time_limi
         tt = db.one("SELECT id, status FROM timetables WHERE formation_id=? AND week_start=?", (formation_id, iso(w)))
         if tt and tt["status"] == "approved":
             out.messages.append(f"أسبوع {iso(w)} معتمد؛ لم يُعدّل.")
+            from ..scheduler.engine import ScheduleResult
             out.weeks.append((w, ScheduleResult(week_start=w, status="APPROVED"), tt["id"]))
             continue
         if not hours:
