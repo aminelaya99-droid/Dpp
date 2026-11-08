@@ -414,7 +414,7 @@ def _style_extra(t: dict) -> str:
     QGroupBox::title {{ padding: 0 10px; }}
     QTableView, QTreeView, QListView, QTableWidget {{ border-radius: 12px; }}
     QHeaderView::section {{ background: {t['header']}; color: {t['muted']}; border-left: none;
-        border-bottom: 1px solid {t['border']}; padding: 8px 10px; }}
+        border-bottom: 1px solid {t['border']}; padding: 6px 6px; }}
     QPushButton#NavItem {{ border-radius: 10px; padding: 9px 12px; }}
     QPushButton#NavItem:checked {{ border-right: 3px solid {t['accent']}; }}
     #ModernSide QLabel#NavGroup {{ padding: 15px 12px 5px 0; letter-spacing: 0.4px; }}
