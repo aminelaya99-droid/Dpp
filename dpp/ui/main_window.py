@@ -54,7 +54,7 @@ PAGES = [
     ("progress", "المقرر والتقدم", "mdi6.chart-donut"),
     ("curriculum", "المقرر", "mdi6.book-clock-outline"),
     ("reports", "التقارير والطباعة", "mdi6.printer-outline"),
-    ("import", "الاستيراد", "mdi6.database-import-outline"),
+    ("import", "الاستيراد والتصدير", "mdi6.swap-horizontal"),
     ("settings", "الإعدادات", "mdi6.cog-outline"),
 ]
 
@@ -377,7 +377,8 @@ class MainWindow(QMainWindow):
             ("المحتوى", [("المواد", "mdi6.book-open-page-variant-outline", P("subjects"), None),
                          ("المتطلبات", "mdi6.clipboard-list-outline", P("requirements"), "الحجم الساعي لكل فوج ومادة"),
                          ("القاعات", "mdi6.door", P("rooms"), None)]),
-            ("الاستيراد", [("ملف .roz / Excel", "mdi6.database-import-outline", P("import"), None)]),
+            ("الاستيراد والتصدير", [("‏.roz / Excel ← DPP", "mdi6.database-import-outline", P("import"), None),
+                                     ("DPP ← aSc ‏(XML)", "mdi6.database-export-outline", P("import"), None)]),
         ])
         self.ribbon.add_tab("الجداول", [
             ("إنشاء", [("إنشاء آلي", "mdi6.auto-fix", self.open_generate, "Ctrl+G"),
@@ -503,9 +504,22 @@ class MainWindow(QMainWindow):
             return p
         return EntityPage(self.ctx, SPECS[key])
 
+    @staticmethod
+    def _polish_page(page):
+        """لفّ الفقرات الطويلة: نص لا يلتفّ يدفع الصفحة أعرض من النافذة فتُقتطع أطرافها."""
+        from PySide6.QtWidgets import QLabel
+        keep = {"PageTitle", "HeaderTitle", "CardValue", "CardTitle", "Badge", "Avatar", "Crumb",
+                "SectionTitle", "PanelTitle", "SideTitle", "SideSub", "NavGroup", "NavText"}
+        for lab in page.findChildren(QLabel):
+            if lab.objectName() in keep or lab.wordWrap():
+                continue
+            if len(lab.text()) > 70:
+                lab.setWordWrap(True)
+
     def show_page(self, key):
         if key not in self.pages:
             self.pages[key] = self._make_page(key)
+            self._polish_page(self.pages[key])
             self.stack.addWidget(self.pages[key])
         self.stack.setCurrentWidget(self.pages[key])
         titles = {k: t for k, t, _ in PAGES}

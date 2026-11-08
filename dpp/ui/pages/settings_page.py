@@ -115,7 +115,7 @@ class SettingsPage(QWidget):
             self.ui_style.addItem(lab, k)
         self.ui_style.setCurrentIndex(max(0, self.ui_style.findData(normalize_style(db.get_setting("ui_style", "ops")))))
         self.ui_style.currentIndexChanged.connect(lambda _: self.style_changed.emit(self.ui_style.currentData()))
-        f3.addRow("الواجهة (أ / ب / ج)", self.ui_style)
+        f3.addRow("الواجهة", self.ui_style)
         self.ui_font = QComboBox()
         for k, lab in TH.FONTS:
             self.ui_font.addItem(lab, k)

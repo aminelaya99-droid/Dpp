@@ -88,6 +88,18 @@ def run() -> int:
             out.append(f"{fmt}:{p.stat().st_size}")
         return "، ".join(out)
 
+    def s_asc():
+        """تصدير أسبوع إلى صيغة aSc ‏(XML) — الطريق المعاكس لاستيراد ‎.roz‎."""
+        from xml.etree import ElementTree as ET
+        from .exporters import asc_xml as AX
+        db = state["db"]
+        ws = db.scalar("SELECT MIN(date) FROM sessions")
+        res = AX.export_week_xml(db, ws, tmp / "asc.xml")
+        root = ET.parse(tmp / "asc.xml").getroot()
+        if root.tag != "timetable" or not res["card"]:
+            raise RuntimeError("ملف aSc بلا بطاقات")
+        return f"بطاقات:{res['card']}، دروس:{res['lesson']}، أقسام:{res['class']}"
+
     def s_official():
         from .exporters import official as O
         from .ui.sheet_view import SheetScene, render_to_pdf
@@ -124,7 +136,7 @@ def run() -> int:
         return "البيانات محفوظة"
 
     ok = all([step("إنشاء قاعدة البيانات", s_db), step("جدولة فترة كاملة", s_plan), step("الواجهة", s_ui),
-              step("التصدير", s_export), step("الطباعة الرسمية", s_official), step("النسخ الاحتياطي والاستعادة", s_backup), step("إعادة الفتح", s_reopen)])
+              step("التصدير", s_export), step("التصدير إلى aSc", s_asc), step("الطباعة الرسمية", s_official), step("النسخ الاحتياطي والاستعادة", s_backup), step("إعادة الفتح", s_reopen)])
     text = "\n".join(report) + f"\n\nالنتيجة: {'نجاح' if ok else 'فشل'}\nمجلد الفحص: {tmp}\n"
     (tmp / "selftest_report.txt").write_text(text, encoding="utf-8")
     try:
