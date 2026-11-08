@@ -122,6 +122,48 @@ THEME_MODES = [("style", "حسب نمط الواجهة"), ("auto", "تلقائي
                ("dark", "داكن (أخضر بترولي)"), ("graphite", "رمادي داكن")]
 FONTS = [("Almarai", "Almarai"), ("Tajawal", "Tajawal"), ("Cairo", "Cairo")]
 
+# اللون الأساسي القابل للاختيار (الإعدادات ← المظهر). لكل لون نسخة للوضع الفاتح وأخرى للداكن.
+# (المفتاح، الاسم، فاتح، فاتح/مرور، داكن، داكن/مرور)
+ACCENTS = [
+    ("green", "أخضر عسكري", "#15803D", "#166534", "#22C55E", "#4ADE80"),
+    ("blue", "أزرق", "#1D4ED8", "#1E40AF", "#60A5FA", "#93C5FD"),
+    ("indigo", "نيلي", "#4338CA", "#3730A3", "#818CF8", "#A5B4FC"),
+    ("maroon", "كستنائي", "#9A3412", "#7C2D12", "#FB923C", "#FDBA74"),
+    ("slate", "رمادي داكن", "#334155", "#1E293B", "#94A3B8", "#CBD5E1"),
+]
+ACCENT_DEFAULT = "green"
+
+
+def accent_name(key: str) -> str:
+    return dict((a[0], a[1]) for a in ACCENTS).get(key, ACCENTS[0][1])
+
+
+def _tint(hex_color: str, dark: bool) -> str:
+    """خلفية تحديد خفيفة مشتقّة من اللون الأساسي."""
+    c = QColor(hex_color)
+    h, s, _l, a = c.getHslF()
+    return QColor.fromHslF(h, max(0.0, min(1.0, s * (0.55 if dark else 0.75))),
+                           0.16 if dark else 0.90, a).name()
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    c = QColor(hex_color)
+    return f"rgba({c.red()},{c.green()},{c.blue()},{alpha})"
+
+
+def with_accent(t: dict, key: str | None, dark: bool) -> dict:
+    """يعيد نسخة من اللوحة بلونها الأساسي مستبدلاً (يُستعمل في نمط «DPP الحديثة» فقط)."""
+    row = next((a for a in ACCENTS if a[0] == key), None)
+    if not row or key == ACCENT_DEFAULT:
+        return t
+    _k, _lab, lig, lig_h, drk, drk_h = row
+    col, hov = (drk, drk_h) if dark else (lig, lig_h)
+    out = dict(t)
+    out.update({"accent": col, "accent_hover": hov, "focus": hov, "cta": col, "cta_hover": hov,
+                "sel": _tint(col, dark), "side_active": _rgba(col, 0.26 if dark else 0.30)})
+    return out
+
+
 CURRENT = dict(LIGHT)
 CURRENT_NAME = "clean"
 
@@ -164,6 +206,8 @@ def apply(app, mode: str, style: str | None = None) -> str:
         style = app.property("ui_style") or "clean"
     name = resolve(mode, style)
     t = PALETTES.get(name, LIGHT)
+    if name in ("command", "command_dark"):
+        t = with_accent(t, app.property("accent_color") or ACCENT_DEFAULT, name == "command_dark")
     CURRENT.clear()
     CURRENT.update(t)
     CURRENT_NAME = name
@@ -346,6 +390,17 @@ def stylesheet(t: dict) -> str:
         color: {t['text']}; }}
     QToolButton#DayTab:checked {{ background: {t['accent']}; color: {t['accent_text']}; border-color: {t['accent']};
         font-weight: bold; }}
+    /* ---------- أقسام الإعدادات ---------- */
+    QListWidget#SettingsNav {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: 12px;
+        padding: 6px; outline: 0; }}
+    QListWidget#SettingsNav::item {{ padding: 9px 10px; border-radius: 9px; color: {t['text']}; }}
+    QListWidget#SettingsNav::item:hover {{ background: {t['surface2']}; }}
+    QListWidget#SettingsNav::item:selected {{ background: {t['sel']}; color: {t['text']}; font-weight: bold; }}
+    QGroupBox#Danger {{ border: 1px solid {t['bad']}; }}
+    QGroupBox#Danger::title {{ color: {t['bad']}; }}
+    QToolButton#Swatch {{ border: 2px solid {t['border']}; border-radius: 9px; }}
+    QToolButton#Swatch:checked {{ border: 2px solid {t['text']}; }}
+
     /* ---------- الواجهة د: DPP الحديثة — الشريط العلوي ---------- */
     QLabel#Crumb {{ color: {t['muted']}; font-size: 9pt; }}
     QLabel#Crumb[cur="1"] {{ color: {t['text']}; font-weight: bold; }}
@@ -402,7 +457,7 @@ def _style_extra(t: dict) -> str:
     QPushButton#NavItem[collapsed="1"] {{ padding: 10px 4px; border-radius: 10px; }}
     QPushButton#Primary, QPushButton#Cta {{ color: {t['accent_text']}; }}
     """
-    if t is COMMAND or t is COMMAND_DARK:
+    if t.get("side_bg") in (COMMAND["side_bg"], COMMAND_DARK["side_bg"]) and t.get("radius") == "12px":
         out += f"""
     QFrame#Card {{ border-radius: 14px; }}
     QFrame#Card:hover {{ border-color: {t['border']}; }}

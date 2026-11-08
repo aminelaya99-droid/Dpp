@@ -54,6 +54,7 @@ def main(argv=None) -> int:
     app.setFont(theme.app_font(db.get_setting("ui_font", "Almarai")))
     from .ui.shell import normalize_style
     app.setProperty("ui_style", normalize_style(db.get_setting("ui_style", "teal")))
+    app.setProperty("accent_color", db.get_setting("accent_color", theme.ACCENT_DEFAULT) or theme.ACCENT_DEFAULT)
     theme.apply(app, db.get_setting("theme", "style") if db.get_setting("theme_v2") == "1" else "style")
     if os.environ.get("DPP_AUTOLOGIN") != "1":
         login = LoginDialog(db, first_run=not db.has_users())

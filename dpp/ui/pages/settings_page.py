@@ -4,7 +4,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QTime, Signal
+from PySide6.QtCore import Qt, QTime, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
                                QLabel, QLineEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
@@ -35,18 +35,35 @@ class SettingsPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 14, 18, 14)
         lay.addWidget(page_title("الإعدادات"))
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._general(), icon("mdi6.domain"), "المؤسسة والوقت")
-        self.tabs.addTab(self._backup(), icon("mdi6.backup-restore"), "النسخ الاحتياطي")
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStackedWidget
         from .settings_more import GridSettings, PrintSettings, SchedulingSettings, SoundSettings, _scroll
-        self.tabs.addTab(PrintSettings(ctx), icon("mdi6.printer-settings"), "الطباعة ومحرر الأوراق")
-        self.tabs.addTab(SchedulingSettings(ctx), icon("mdi6.calendar-cursor"), "البرمجة والتعارضات")
         self.grid_settings = GridSettings(ctx)
-        self.tabs.addTab(_scroll(self.grid_settings), icon("mdi6.table-cog"), "الجدول العام")
-        self.tabs.addTab(SoundSettings(ctx), icon("mdi6.volume-high"), "الأصوات")
-        self.tabs.addTab(self._account(), icon("mdi6.account-lock-outline"), "الحساب")
-        self.tabs.addTab(self._audit(), icon("mdi6.history"), "سجل العمليات")
-        lay.addWidget(self.tabs, 1)
+        # أقسام واضحة بدل شريط تبويبات طويل: قائمة جانبية + صفحة لكل قسم
+        self.nav = QListWidget()
+        self.nav.setObjectName("SettingsNav")
+        self.nav.setFixedWidth(218)
+        self.nav.setIconSize(QSize(18, 18))
+        self.stack = QStackedWidget()
+        sections = [("المؤسسة والوقت", "mdi6.domain", self._general()),
+                    ("المظهر", "mdi6.palette-outline", self._appearance()),
+                    ("الجدول العام", "mdi6.table-cog", _scroll(self.grid_settings)),
+                    ("البرمجة والتعارضات", "mdi6.calendar-cursor", SchedulingSettings(ctx)),
+                    ("الطباعة ومحرر الأوراق", "mdi6.printer-settings", PrintSettings(ctx)),
+                    ("الأصوات", "mdi6.volume-high", SoundSettings(ctx)),
+                    ("الحساب والأمان", "mdi6.account-lock-outline", self._account()),
+                    ("النسخ الاحتياطي والبيانات", "mdi6.backup-restore", self._backup()),
+                    ("سجل العمليات", "mdi6.history", self._audit())]
+        for title, ic, widget in sections:
+            QListWidgetItem(icon(ic), title, self.nav)
+            self.stack.addWidget(widget)
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+        row = QHBoxLayout()
+        row.setSpacing(14)
+        row.addWidget(self.nav)
+        row.addWidget(self.stack, 1)
+        lay.addLayout(row, 1)
 
     # ------------------------------------------------------------------
     def _general(self):
@@ -99,6 +116,17 @@ class SettingsPage(QWidget):
         self.y_start.setToolTip("الأسبوع الأول من السنة الدراسية: منه تُحسب أرقام الأسابيع («الأسبوع الثامن» في الطباعة)")
         f2.addRow("بداية السنة الدراسية (الأسبوع الأول)", self.y_start)
         v.addWidget(g2)
+        save = QPushButton(icon("mdi6.content-save"), "حفظ الإعدادات")
+        save.setObjectName("Primary")
+        save.clicked.connect(self.save_general)
+        v.addWidget(save)
+        v.addStretch()
+        return w
+
+    def _appearance(self):
+        db = self.ctx.db
+        w = QWidget()
+        v = QVBoxLayout(w)
         g3 = QGroupBox("المظهر")
         f3 = QFormLayout(g3)
         self.theme = QComboBox()
@@ -129,13 +157,45 @@ class SettingsPage(QWidget):
         self.ui_font.currentIndexChanged.connect(_font)
         f3.addRow("خط الواجهة", self.ui_font)
         f3.addRow("اللغة", QLabel("العربية (مع عرض الأسماء والاختصارات الفرنسية)"))
+        # اللون الأساسي (نمط «DPP الحديثة»)
+        from PySide6.QtGui import QColor, QPixmap
+        from PySide6.QtWidgets import QButtonGroup, QToolButton
+        sw = QWidget()
+        sl = QHBoxLayout(sw)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(8)
+        self.accent_group = QButtonGroup(self)
+        cur = db.get_setting("accent_color", TH.ACCENT_DEFAULT) or TH.ACCENT_DEFAULT
+        dark = TH.is_dark()
+        for key, label, lig, _lh, drk, _dh in TH.ACCENTS:
+            b = QToolButton()
+            b.setObjectName("Swatch")
+            b.setCheckable(True)
+            b.setFixedSize(30, 30)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip(label)
+            b.setAccessibleName(label)
+            pm = QPixmap(18, 18)
+            pm.fill(QColor(drk if dark else lig))
+            b.setIcon(pm)
+            b.setChecked(key == cur)
+            b.clicked.connect(lambda _=False, k=key: self._set_accent(k))
+            self.accent_group.addButton(b)
+            sl.addWidget(b)
+        sl.addStretch()
+        f3.addRow("اللون الأساسي", sw)
+        self.accent_hint = QLabel("يُطبَّق على واجهة «DPP الحديثة» في الوضعين الفاتح والداكن.")
+        self.accent_hint.setObjectName("Muted")
+        f3.addRow("", self.accent_hint)
         v.addWidget(g3)
-        save = QPushButton(icon("mdi6.content-save"), "حفظ الإعدادات")
-        save.setObjectName("Primary")
-        save.clicked.connect(self.save_general)
-        v.addWidget(save)
         v.addStretch()
         return w
+
+    def _set_accent(self, key: str):
+        from PySide6.QtWidgets import QApplication
+        self.ctx.db.set_setting("accent_color", key)
+        QApplication.instance().setProperty("accent_color", key)
+        self.theme_changed.emit(self.ctx.db.get_setting("theme", "style") or "style")
 
     def _show_logo(self):
         p = self.ctx.db.get_setting("institution_logo")
@@ -206,12 +266,7 @@ class SettingsPage(QWidget):
         now = QPushButton(icon("mdi6.content-save-move-outline"), "نسخة احتياطية الآن")
         now.setObjectName("Primary")
         now.clicked.connect(self.backup_now)
-        rest = QPushButton(icon("mdi6.backup-restore"), "استعادة النسخة المحددة")
-        rest.clicked.connect(self.restore_selected)
-        other = QPushButton(icon("mdi6.folder-open-outline"), "استعادة من ملف…")
-        other.clicked.connect(self.restore_file)
-        for b in (now, rest, other):
-            row.addWidget(b)
+        row.addWidget(now)
         row.addStretch()
         v.addLayout(row)
         self.btable = QTableWidget(0, 4)
@@ -223,6 +278,26 @@ class SettingsPage(QWidget):
         self.btable.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.btable, 1)
         self.refresh_backups()
+        # منطقة الخطر: الاستعادة تستبدل كل البيانات الحالية
+        dz = QGroupBox("منطقة الخطر")
+        dz.setObjectName("Danger")
+        dv = QVBoxLayout(dz)
+        warn = QLabel("الاستعادة تستبدل كل البيانات الحالية بمحتوى النسخة المختارة. تُحفظ نسخة من البيانات "
+                      "الحالية أولاً، ويُطلب تأكيد قبل التنفيذ.")
+        warn.setWordWrap(True)
+        dv.addWidget(warn)
+        dr2 = QHBoxLayout()
+        rest = QPushButton(icon("mdi6.backup-restore"), "استعادة النسخة المحددة")
+        rest.setObjectName("Danger")
+        rest.clicked.connect(self.restore_selected)
+        other = QPushButton(icon("mdi6.folder-open-outline"), "استعادة من ملف…")
+        other.setObjectName("Danger")
+        other.clicked.connect(self.restore_file)
+        dr2.addWidget(rest)
+        dr2.addWidget(other)
+        dr2.addStretch()
+        dv.addLayout(dr2)
+        v.addWidget(dz)
         return w
 
     def pick_dir(self):

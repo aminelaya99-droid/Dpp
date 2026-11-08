@@ -88,3 +88,34 @@ def test_command_palettes_light_and_dark(seeded):
             app.processEvents()
     w.apply_theme("style")
     w.close()
+
+
+def test_settings_sections_and_accent(seeded):
+    """الإعدادات بأقسام جانبية، واللون الأساسي يُغيّر لوحة الألوان ويُحفظ."""
+    app = _app()
+    db, _ids = seeded
+    w = MainWindow(AppContext(db), app)
+    w.show()
+    w.navigate("settings")
+    app.processEvents()
+    page = w.pages["settings"]
+    assert page.nav.count() == page.stack.count() >= 8
+    titles = [page.nav.item(i).text() for i in range(page.nav.count())]
+    assert "المظهر" in titles and "المؤسسة والوقت" in titles and "النسخ الاحتياطي والبيانات" in titles
+    for i in range(page.nav.count()):                       # كل قسم يُفتح بلا خطأ
+        page.nav.setCurrentRow(i)
+        app.processEvents()
+        assert page.stack.currentIndex() == i
+
+    before = theme.CURRENT["accent"]
+    page._set_accent("blue")
+    app.processEvents()
+    assert db.get_setting("accent_color") == "blue"
+    assert theme.CURRENT["accent"] != before == "#15803D"
+    assert theme.CURRENT["accent"] == "#1D4ED8"
+    w.apply_theme("dark")                                   # اللون له نسخة للوضع الداكن
+    app.processEvents()
+    assert theme.CURRENT_NAME == "command_dark" and theme.CURRENT["accent"] == "#60A5FA"
+    page._set_accent("green")
+    w.apply_theme("style")
+    w.close()
