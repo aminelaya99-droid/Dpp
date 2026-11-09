@@ -19,7 +19,7 @@
 ```bash
 pip install -r requirements-dev.txt          # Python 3.12 (64-bit)
 python run_dpp.py                             # تشغيل البرنامج
-QT_QPA_PLATFORM=offscreen python -m pytest -q tests     # 112 اختباراً (~4 دقائق)
+QT_QPA_PLATFORM=offscreen python -m pytest -q tests     # 117 اختباراً (~3 دقائق)
 python run_dpp.py --selftest                  # الفحص الذاتي (يعمل من DPP.exe أيضاً)
 pyinstaller --noconfirm dpp.spec              # dist/DPP/DPP.exe
 ```
