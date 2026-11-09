@@ -205,6 +205,11 @@ def stylesheet(t: dict) -> str:
     QLabel#PageTitle {{ font-size: 16pt; font-weight: bold; color: {t['text']}; }}
     QLabel#Muted {{ color: {t['muted']}; }}
     QLabel#SectionTitle {{ font-size: 11.5pt; font-weight: bold; color: {t['text']}; }}
+    /* ---------- المساعد الذكي ---------- */
+    QFrame#ChatBot {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: 12px; }}
+    QFrame#ChatUser {{ background: {t['sel']}; border: 1px solid {t['border']}; border-radius: 12px; }}
+    QFrame#ChatBot QLabel, QFrame#ChatUser QLabel {{ color: {t['text']}; }}
+    QFrame#ChatBot QLabel#Muted, QFrame#ChatUser QLabel#Muted {{ color: {t['muted']}; font-size: 9pt; }}
     QTableView, QTreeView, QListView, QTableWidget {{ background: {t['surface']}; alternate-background-color: {t['surface2']};
         border: 1px solid {t['border']}; border-radius: 8px; gridline-color: {t['grid']};
         selection-background-color: {t['sel']}; selection-color: {t['text']}; outline: 0; }}

@@ -48,6 +48,21 @@ def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
     return h.hex(), salt
 
 
+def open_reader(path: str | Path, user: str = "reader") -> "Database":
+    """اتصال إضافي بنفس الملف للقراءة فقط: بلا ترحيلات وبلا إنشاء مخطط.
+
+    يُستعمل من خيط آخر (المساعد الذكي مثلاً) حتى لا يتشارك خيطان نفس الاتصال.
+    الكتابة ممنوعة عُرفاً هنا: من يستعمله يُصدر SELECT فقط.
+    """
+    db = Database.__new__(Database)
+    db.path = Path(path)
+    db.conn = sqlite3.connect(str(db.path), check_same_thread=False, isolation_level=None)
+    db.conn.row_factory = sqlite3.Row
+    db.conn.execute("PRAGMA foreign_keys = ON")
+    db.current_user = user
+    return db
+
+
 class Database:
     def __init__(self, path: str | Path):
         self.path = Path(path)
