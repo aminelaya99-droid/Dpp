@@ -19,7 +19,7 @@
 ```bash
 pip install -r requirements-dev.txt          # Python 3.12 (64-bit)
 python run_dpp.py                             # تشغيل البرنامج
-QT_QPA_PLATFORM=offscreen python -m pytest -q tests     # 87 اختباراً (~4 دقائق)
+QT_QPA_PLATFORM=offscreen python -m pytest -q tests     # 112 اختباراً (~4 دقائق)
 python run_dpp.py --selftest                  # الفحص الذاتي (يعمل من DPP.exe أيضاً)
 pyinstaller --noconfirm dpp.spec              # dist/DPP/DPP.exe
 ```
@@ -54,6 +54,8 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 | `dpp/exporters/word_tpl.py`, `ui/word_ui.py` | قوالب Word لكل طور/قسم: توليد، فحص، ملء، مراقبة الحفظ في Word |
 | `dpp/exporters/word_pdf.py`, `week_export.py` | PDF عبر Word (PowerShell COM) وتصدير الأسبوع كاملاً |
 | `dpp/services/weeks.py`, `ui/pages/weeks_page.py` | صفحة الأسابيع |
+| `dpp/ai/provider.py`, `tools.py`, `agent.py` | المساعد الذكي المحلي: Ollama/LM Studio، أدوات قراءة (SELECT فقط)، حلقة سؤال←أدوات←جواب |
+| `dpp/ui/pages/assistant.py` + `ai/standalone.py` | صفحة المساعد (خيط منفصل + `open_reader`)، والنافذة المستقلة `python -m dpp.ai` |
 | `dpp/services/duty.py`, `ui/pages/duty_page.py` | الخفارة والخدمات (نظام منفصل عن الجدول) |
 | `dpp/services/fullday.py`, `calendar.py` | بطاقات اليوم الكامل، الأحداث والأيام المحجوبة |
 | `dpp/importers/` | aSc `.roz`، الأسابيع السابقة، المقرر، المخطط الزمني، Excel |
@@ -89,9 +91,12 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 - كل عملية في الجدول العام تمر عبر `grid._push` (للتراجع)، والعمليات المركبة داخل `begin_group/end_group`.
 - بعد أي تعديل للبيانات: `ctx.changed("<المجال>")` لتحديث الصفحات.
 - الاختبارات الواجهية تعمل بـ `QT_QPA_PLATFORM=offscreen`؛ لا تفتح نوافذ modal في الاختبارات (استعمل monkeypatch).
+- **المساعد الذكي:** أدوات `dpp/ai/tools.py` تقرأ فقط (اختبار يقارن عدد الأسطر قبل/بعد). النموذج يعمل في
+  خيط منفصل باتصال `open_reader` خاص: لا تُشارك اتصال sqlite بين خيطين. الإعدادات JSON في
+  `settings['ai_config']` (بلا ترحيل). نص فيه أقواس JSON لا يُمرَّر إلى `str.format`.
 - `DPP.exe` في الإصدارات 1.4–1.6 بُني بتبديل شيفرة البرنامج داخل نسخة PyInstaller سابقة؛ من الآن يُبنى كاملاً
   بـ `dpp.spec` (محلياً أو عبر GitHub Actions). أي مكتبة جديدة تُضاف إلى `requirements.txt`.
 
 ## التاريخ
 
-الإصدارات وتفاصيلها في `README.md` و`docs/releases/`. آخر إصدار: **1.6.0** (02/11/2026).
+الإصدارات وتفاصيلها في `README.md` و`docs/releases/`. آخر إصدار: **1.7.0** (09/11/2026) — المساعد الذكي المحلي (قراءة فقط؛ التعديل في 1.8).

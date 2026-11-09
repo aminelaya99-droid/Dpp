@@ -32,6 +32,7 @@ from .widgets import confirm, error, icon, info
 PAGES = [
     ("master", "الجدول العام", "mdi6.table-large"),
     ("dashboard", "لوحة التحكم", "mdi6.view-dashboard-outline"),
+    ("assistant", "المساعد الذكي", "mdi6.robot-outline"),
     ("planner", "المخطط الأسبوعي", "mdi6.calendar-week"),
     ("weeks", "الأسابيع", "mdi6.calendar-multiple-check"),
     ("formations", "التكوينات", "mdi6.school-outline"),
@@ -465,6 +466,9 @@ class MainWindow(QMainWindow):
             return MasterPage(self.ctx)
         if key == "dashboard":
             return DashboardPage(self.ctx)
+        if key == "assistant":
+            from .pages.assistant import AssistantPage
+            return AssistantPage(self.ctx)
         if key == "planner":
             return PlannerPage(self.ctx)
         if key == "absences":
