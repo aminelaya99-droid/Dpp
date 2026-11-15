@@ -846,8 +846,11 @@ class PlannerPage(QWidget):
 
     def auto_section(self):
         from PySide6.QtWidgets import QApplication
-        from ...scheduler.engine import Scheduler
+        from ...scheduler.engine import Scheduler, available, unavailable_message
         from ...services import priorities as PRI
+        if not available():
+            info(self, unavailable_message())
+            return
         sec = self._section()
         if not sec:
             info(self, "اختر العرض حسب القسم أو الفوج.")

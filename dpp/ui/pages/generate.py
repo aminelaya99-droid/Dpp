@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDateEdit, QDialog,
                                QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 
 from ...db.database import Database
-from ...scheduler.engine import Scheduler
 from ...services import timetables as T
 from ...utils import hm, iso, week_start
 from ..context import AppContext
@@ -49,6 +48,7 @@ class Worker(QObject):
                         from ...services import priorities as PRI
                         override, plan_rows = PRI.week_plan(db, fid, j["week"], j.get("groups"))
                         rules = PRI.rules(db)
+                    from ...scheduler.engine import Scheduler
                     res = Scheduler(db, time_limit=j["time_limit"]).schedule_week(
                         fid, j["week"], j.get("groups"), hours_override=override, rules=rules)
                     if plan_rows is not None:
@@ -59,8 +59,9 @@ class Worker(QObject):
                         T.save_result(db, fid, res)
                 results.append(res)
             self.done.emit(results if len(results) > 1 else results[0])
-        except Exception:
-            self.failed.emit(traceback.format_exc())
+        except Exception as e:
+            from ...scheduler.engine import SchedulerUnavailable
+            self.failed.emit(str(e) if isinstance(e, SchedulerUnavailable) else traceback.format_exc())
         finally:
             db.close()
 

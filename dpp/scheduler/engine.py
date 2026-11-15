@@ -15,7 +15,27 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 
-from ortools.sat.python import cp_model
+try:                                       # OR-Tools قد يتعطل على جهاز ما (ملفات DLL ناقصة): البرنامج يبقى يعمل
+    from ortools.sat.python import cp_model
+    ORTOOLS_ERROR: str | None = None
+except Exception as _e:                    # ImportError / OSError
+    cp_model = None
+    ORTOOLS_ERROR = f"{type(_e).__name__}: {_e}"
+
+
+class SchedulerUnavailable(RuntimeError):
+    """محرك OR-Tools غير متاح على هذا الجهاز."""
+
+
+def available() -> bool:
+    return cp_model is not None
+
+
+def unavailable_message() -> str:
+    return ("البرمجة الآلية غير متاحة على هذا الجهاز: تعذّر تحميل محرك OR-Tools.\n"
+            "تأكد أن المجلد _internal\\ortools\\.libs موجود بجانب البرنامج (يُفقد أحياناً عند فك الضغط)، "
+            "ثم أعد تشغيل DPP. بقية البرنامج تعمل عادياً.\n\n"
+            f"التفصيل التقني: {ORTOOLS_ERROR}")
 
 from ..db.database import Database
 from ..services.calendar import blocked_dates
@@ -114,6 +134,8 @@ class DayGrid:
 # ---------------------------------------------------------------------------
 class Scheduler:
     def __init__(self, db: Database, time_limit: float = 30.0, workers: int = 8):
+        if cp_model is None:
+            raise SchedulerUnavailable(unavailable_message())
         self.db = db
         self.time_limit = time_limit
         self.workers = workers

@@ -1,7 +1,7 @@
 name: بناء DPP لـ Windows
 
 # كل push: اختبارات + فحص ذاتي + بناء DPP.exe (يُحمَّل من صفحة الـ Actions، Artifact باسم DPP-windows)
-# وسم يبدأ بـ v (مثل v1.7.0): نفس الشيء + Release فيه DPP-windows.zip جاهز للتحميل
+# وسم يبدأ بـ v (مثل v1.8.0): نفس الشيء + Release فيه DPP-windows.zip جاهز للتحميل
 on:
   push:
     branches: ["**"]
@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONIOENCODING: utf-8
@@ -22,6 +22,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: تثبيت المكتبات
         run: |
@@ -40,6 +43,13 @@ jobs:
       - name: بناء exe
         run: pyinstaller --noconfirm dpp.spec
 
+      - name: فحص ملفات OR-Tools داخل البرنامج
+        run: |
+          foreach ($f in "ortools.dll","abseil_dll.dll","libprotobuf.dll") {
+            if (-not (Test-Path "dist\DPP\_internal\ortools\.libs\$f")) { throw "ناقص: _internal\ortools\.libs\$f" }
+          }
+          Get-ChildItem dist\DPP\_internal\ortools\.libs | Format-Table Name, Length
+
       - name: فحص ذاتي من exe
         timeout-minutes: 6          # exe معلّق لا يجب أن يوقف البناء ساعات
         env:
@@ -57,13 +67,38 @@ jobs:
           name: DPP-windows
           path: dist/DPP
           retention-days: 30
+          include-hidden-files: true   # ضروري: OR-Tools يضع ملفاته في مجلد ".libs" (يبدأ بنقطة) وكان يُحذف من الملف المرفوع
 
       - name: ضغط للإصدار
         if: startsWith(github.ref, 'refs/tags/v')
-        run: Compress-Archive -Path dist/DPP -DestinationPath DPP-windows.zip
+        run: 7z a -tzip DPP-windows.zip .\dist\DPP
 
       - name: إصدار
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: DPP-windows.zip
+
+  # يحمّل الملف المرفوع نفسه (ما يحمّله المستخدم) على جهاز نظيف ويشغّل الفحص الذاتي منه، مع نموذج حقيقي صغير
+  verify:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DPP-windows
+          path: DPP
+      - name: الملف المرفوع فيه OR-Tools
+        run: |
+          if (-not (Test-Path "DPP\_internal\ortools\.libs\ortools.dll")) { throw "الملف المرفوع بلا _internal\ortools\.libs" }
+      - name: فحص ذاتي من الملف المرفوع
+        timeout-minutes: 8
+        env:
+          QT_QPA_PLATFORM: offscreen
+          DPP_DATA_DIR: ${{ runner.temp }}\dpp-verify
+        run: |
+          $p = Start-Process -FilePath DPP\DPP.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-ChildItem -Path $env:TEMP -Filter "selftest_report.txt" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Encoding UTF8
+          if ($p.ExitCode -ne 0) { throw "selftest failed: $($p.ExitCode)" }
