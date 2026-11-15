@@ -39,6 +39,7 @@ def normalize_style(style: str | None) -> str:
 
 NAV_GROUPS = [
     ("الجدولة", ["master", "planner", "weeks", "dashboard"]),
+    ("المساعد", ["assistant"]),
     ("البيانات", ["formations", "structure", "levels", "specialties", "cohorts", "periods", "sections", "groups", "subjects", "rooms", "requirements", "teachers",
                  "categories"]),
     ("المتابعة", ["absences", "calendar", "duty", "progress", "reports", "unavailability"]),
