@@ -1,4 +1,4 @@
-"""استيراد ملفات aSc Timetables (.roz) وملفات Excel مع المعاينة والمطابقة."""
+"""الاستيراد والتصدير: ملفات aSc Timetables (.roz) وملفات Excel، وتصدير أسبوع إلى aSc (XML)."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -19,12 +19,14 @@ class ImportPage(QWidget):
         self.roz = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 14, 18, 14)
-        lay.addWidget(page_title("الاستيراد", "استيراد البيانات من aSc Timetables (.roz) أو من Excel. "
-                                              "تُعرض معاينة كاملة قبل أي تغيير في قاعدة البيانات."))
+        lay.addWidget(page_title("الاستيراد والتصدير",
+                                 "استيراد البيانات من aSc Timetables ‏(.roz) أو من Excel — تُعرض معاينة كاملة قبل أي "
+                                 "تغيير في قاعدة البيانات — وتصدير أسبوع من DPP إلى aSc."))
         tabs = QTabWidget()
         tabs.addTab(self._history_tab(), icon("mdi6.calendar-import"), "الأسابيع السابقة (aSc) + المخطط الزمني")
         tabs.addTab(self._roz_tab(), icon("mdi6.file-table-outline"), "ملف aSc Timetables (.roz)")
         tabs.addTab(self._excel_tab(), icon("mdi6.file-excel-outline"), "ملف Excel")
+        tabs.addTab(self._export_tab(), icon("mdi6.database-export-outline"), "التصدير إلى aSc")
         lay.addWidget(tabs, 1)
 
     # ------------------------------------------------------------------ الأسابيع السابقة
@@ -141,6 +143,103 @@ class ImportPage(QWidget):
             return
         self.hist_log.append(f"المخطط الزمني: {r['rows']} صفاً، {r['weeks']} أسبوعاً.")
         self.ctx.changed("timeline")
+
+    # ------------------------------------------------------------------ التصدير إلى aSc
+    def _export_tab(self):
+        from PySide6.QtCore import QDate
+        from PySide6.QtWidgets import QDateEdit
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(QLabel(
+            "يُصدَّر أسبوع كامل من DPP إلى صيغة الاستيراد الرسمية في aSc Timetables ‏(XML): الأيام والفترات والمواد "
+            "والأساتذة والقاعات والأقسام والأفواج والدروس والبطاقات بمواضعها.\n"
+            "في aSc: ملف ← استيراد ← XML، ثم احفظ باسم ‎.roz‎ — فتكتمل الدورة ‎.roz‎ ← DPP ← ‎.roz‎.\n"
+            "ملاحظة: ‎.roz‎ صيغة ثنائية مغلقة، لذلك الكتابة المباشرة إليها غير مدعومة؛ aSc نفسه يحوّل XML إليها."))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("أسبوع يبدأ يوم الأحد:"))
+        self.exp_week = QDateEdit()
+        self.exp_week.setCalendarPopup(True)
+        self.exp_week.setDisplayFormat("dd/MM/yyyy")
+        from ...utils import week_start
+        import datetime as _dt
+        ws = week_start(_dt.date.today())
+        self.exp_week.setDate(QDate(ws.year, ws.month, ws.day))
+        row.addWidget(self.exp_week)
+        row.addWidget(QLabel("التكوين:"))
+        self.exp_formation = QComboBox()
+        self.exp_formation.addItem("كل التكوينات", None)
+        for r in self.ctx.db.q("SELECT id, name FROM formations ORDER BY archived, name"):
+            self.exp_formation.addItem(r[1], r[0])
+        row.addWidget(self.exp_formation, 1)
+        v.addLayout(row)
+        btns = QHBoxLayout()
+        prev = QPushButton(icon("mdi6.eye-outline"), "معاينة ما سيُصدَّر")
+        prev.clicked.connect(self.preview_export)
+        btns.addWidget(prev)
+        go = QPushButton(icon("mdi6.database-export-outline"), "تصدير إلى ملف XML…")
+        go.setObjectName("Primary")
+        go.clicked.connect(self.do_export)
+        btns.addWidget(go)
+        btns.addStretch()
+        v.addLayout(btns)
+        self.exp_log = QTextEdit()
+        self.exp_log.setReadOnly(True)
+        v.addWidget(self.exp_log, 1)
+        return w
+
+    def _export_args(self):
+        d = self.exp_week.date()
+        import datetime as _dt
+        ws = _dt.date(d.year(), d.month(), d.day())
+        fid = self.exp_formation.currentData()
+        return ws, ([fid] if fid else None)
+
+    def preview_export(self):
+        from ...exporters import asc_xml as AX
+        ws, fids = self._export_args()
+        try:
+            data = AX.collect(self.ctx.db, ws, fids)
+        except Exception as e:                       # noqa: BLE001
+            error(self, f"تعذّرت المعاينة: {e}")
+            return
+        n = len(data["sessions"])
+        if not n:
+            self.exp_log.setPlainText("لا توجد حصص في هذا الأسبوع لهذا التكوين. اختر أسبوعاً آخر أو أنشئ الجدول أولاً.")
+            return
+        subj = len({s["subject_id"] for s in data["sessions"]})
+        teach = len({s["teacher_id"] for s in data["sessions"] if s["teacher_id"]})
+        rooms = len({s["room_id"] for s in data["sessions"] if s["room_id"]})
+        groups = len({g for s in data["sessions"] for g in s["groups"]})
+        self.exp_log.setPlainText(
+            f"الأسبوع {data['ws']} — سيُصدَّر:\n"
+            f"  الحصص (البطاقات): {n}\n  المواد: {subj}\n  الأساتذة: {teach}\n"
+            f"  القاعات: {rooms}\n  الأفواج: {groups}")
+
+    def do_export(self):
+        from pathlib import Path
+        from ...exporters import asc_xml as AX
+        ws, fids = self._export_args()
+        name = AX.default_name(self.ctx.db, ws)
+        path, _ = QFileDialog.getSaveFileName(self, "حفظ ملف aSc XML", name, "aSc XML (*.xml)")
+        if not path:
+            return
+        if not path.lower().endswith(".xml"):
+            path += ".xml"
+        try:
+            res = AX.export_week_xml(self.ctx.db, ws, path, fids)
+        except Exception as e:                       # noqa: BLE001
+            error(self, f"تعذّر التصدير: {e}")
+            return
+        self.exp_log.setPlainText(
+            f"حُفظ الملف:\n{res['path']}\n\n"
+            f"البطاقات: {res['card']} · الدروس: {res['lesson']} · المواد: {res['subject']} · "
+            f"الأساتذة: {res['teacher']} · الأقسام: {res['class']} · الأفواج: {res['group']} · "
+            f"القاعات: {res['classroom']}\n\n"
+            "افتح aSc Timetables ثم: ملف ← استيراد ← XML، واحفظ باسم ‎.roz‎.")
+        if not res["card"]:
+            info(self, "صُدِّر الملف لكنه بلا بطاقات: لا توجد حصص في هذا الأسبوع.", "تنبيه")
+        else:
+            self.ctx.status.emit(f"صُدِّر الأسبوع إلى {Path(path).name}")
 
     # ------------------------------------------------------------------ roz
     def _roz_tab(self):

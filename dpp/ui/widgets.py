@@ -1,11 +1,11 @@
 """عناصر واجهة مشتركة: بطاقات، مخططات، رسائل، نوافذ نماذج، أيقونات."""
 from __future__ import annotations
 
-from PySide6.QtCore import QDate, QRectF, Qt, QTime, Signal
+from PySide6.QtCore import QDate, QEvent, QRectF, Qt, QTime, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QSizePolicy,
-                               QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
+                               QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+                               QSizePolicy, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
 from . import theme
 
@@ -48,6 +48,52 @@ def confirm(parent, text: str, title: str = "تأكيد", danger=False) -> bool:
 
 
 # ------------------------------------------------------------------ بطاقة إحصائية
+class EmptyState(QFrame):
+    """حالة فارغة احترافية: أيقونة + عنوان + شرح + إجراء اختياري.
+
+    تُستعمل بدل سطر «لا توجد بيانات» وسط بطاقة فارغة كبيرة."""
+
+    def __init__(self, icon_name: str, title: str, hint: str = "", action: str = "", on_action=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("EmptyState")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 22, 18, 22)
+        v.setSpacing(8)
+        v.setAlignment(Qt.AlignCenter)
+        self._icon_name = icon_name
+        self.ic = QLabel()
+        self.ic.setObjectName("EmptyIcon")
+        self.ic.setFixedSize(52, 52)
+        self.ic.setAlignment(Qt.AlignCenter)
+        v.addWidget(self.ic, 0, Qt.AlignHCenter)
+        self.title = QLabel(title)
+        self.title.setObjectName("EmptyTitle")
+        self.title.setAlignment(Qt.AlignCenter)
+        self.title.setWordWrap(True)
+        v.addWidget(self.title)
+        self.hint = QLabel(hint)
+        self.hint.setObjectName("Muted")
+        self.hint.setAlignment(Qt.AlignCenter)
+        self.hint.setWordWrap(True)
+        self.hint.setVisible(bool(hint))
+        v.addWidget(self.hint)
+        if action and on_action:
+            b = QPushButton(action)
+            b.setObjectName("Primary")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(on_action)
+            v.addWidget(b, 0, Qt.AlignHCenter)
+        self.recolor()
+
+    def recolor(self):
+        self.ic.setPixmap(icon(self._icon_name, theme.CURRENT["muted"]).pixmap(26, 26))
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() == QEvent.PaletteChange:
+            self.recolor()
+
+
 class StatCard(QFrame):
     clicked = Signal(str)
 
@@ -150,7 +196,7 @@ class BarCompare(QWidget):
         t = theme.CURRENT
         if not self.items:
             p.setPen(QColor(t["muted"]))
-            p.drawText(self.rect(), Qt.AlignCenter, "لا توجد بيانات بعد.")
+            p.drawText(self.rect(), Qt.AlignCenter, "لا توجد ساعات مبرمجة أو منجزة في هذه المدة.")
             return
         w = self.width()
         label_w = min(170, w // 3)
@@ -213,7 +259,7 @@ class LineChart(QWidget):
         p.fillRect(self.rect(), QColor(t["surface"]))
         if not self.labels or not self.series:
             p.setPen(QColor(t["muted"]))
-            p.drawText(self.rect(), Qt.AlignCenter, "لا توجد بيانات بعد.")
+            p.drawText(self.rect(), Qt.AlignCenter, "لا توجد بيانات لرسمها في هذه المدة.")
             return
         # الرسم من اليسار إلى اليمين (الزمن)، مستقل عن اتجاه الواجهة
         p.setLayoutDirection(Qt.LeftToRight)

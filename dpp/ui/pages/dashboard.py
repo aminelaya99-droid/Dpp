@@ -15,7 +15,7 @@ from ...services import hours as H
 from ...utils import iso, week_days, week_start
 from .. import theme
 from ..context import AppContext
-from ..widgets import BarCompare, DonutChart, StatCard, icon
+from ..widgets import BarCompare, DonutChart, EmptyState, StatCard, icon
 
 CARDS = [
     ("formations", "التكوينات النشطة", "mdi6.school-outline"),
@@ -283,7 +283,10 @@ class DashboardPage(QWidget):
             it.setData(Qt.UserRole, "calendar")
             self.events.addItem(it)
         if self.events.count() == 0:
-            self.events.addItem("لا توجد مواعيد قريبة.")
+            it = QListWidgetItem(icon("mdi6.calendar-check-outline", theme.CURRENT["muted"]),
+                                 "لا توجد مواعيد قريبة — أضِف امتحاناً أو حدثاً من صفحة «الرزنامة».")
+            it.setData(Qt.UserRole, "calendar")
+            self.events.addItem(it)
 
         # المخططات الحلقية
         while self.donuts.count():
@@ -299,9 +302,10 @@ class DashboardPage(QWidget):
             for name, (tot, done) in list(agg.items())[:8]:
                 self.donuts.addWidget(DonutChart(name, done / tot * 100 if tot else 0, f"{done:g} من {tot:g} سا", size=120))
         if self.donuts.count() == 0:
-            lab = QLabel("لا توجد بيانات تقدم بعد.")
-            lab.setObjectName("Muted")
-            self.donuts.addWidget(lab)
+            self.donuts.addWidget(EmptyState(
+                "mdi6.chart-donut", "لا توجد بيانات تقدم بعد",
+                "نِسَب الإنجاز تحتاج الحجم الساعي المقرر لكل مادة. أدخله أو استورده من صفحة «المقرر والتقدم».",
+                "فتح المقرر والتقدم", lambda: self.ctx.navigate.emit("progress", None)))
         self.donuts.addStretch()
         days = week_days(week_start(today))
         rows = db.q("""SELECT t.full_name n, SUM(CASE WHEN s.status IN ('planned','done') THEN s.end_min-s.start_min ELSE 0 END) p,
