@@ -93,7 +93,7 @@ class FakeResp:
 # ---------------------------------------------------------------- الإعدادات
 def test_config_roundtrip_and_bad_json(db):
     cfg = load_config(db)
-    assert cfg.kind == "auto" and cfg.enabled and cfg.num_ctx == 4096
+    assert cfg.kind == "auto" and cfg.enabled and cfg.num_ctx == 8192
     cfg.model, cfg.temperature, cfg.use_tools = "qwen3:4b", 0.5, False
     save_config(db, cfg)
     again = load_config(db)
@@ -320,7 +320,7 @@ def test_offline_message_is_arabic_and_flagged():
     assert "خدمة النماذج المحلية" in str(e.value)
     with pytest.raises(AIError) as e2:
         make_provider(AIConfig(kind="auto", timeout=3))
-    assert "لم أجد خدمة نماذج محلية" in str(e2.value) and e2.value.offline
+    assert "ملف نموذج" in str(e2.value) and "Ollama" in str(e2.value) and e2.value.offline   # 1.8: الداخلي أولاً
 
 
 def test_model_auto_pick():
@@ -401,7 +401,7 @@ def test_assistant_page_probe_offline(seeded, monkeypatch):
         app.processEvents()
         time.sleep(0.01)
     app.processEvents()
-    assert "متوقفة" in page.state.text()
+    assert "لا يوجد نموذج" in page.state.text()                      # 1.8
     page.close()
 
 

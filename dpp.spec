@@ -12,6 +12,15 @@ datas += collect_data_files("openpyxl")
 binaries = collect_dynamic_libs("ortools")
 hiddenimports = collect_submodules("ortools.sat") + collect_submodules("dpp") + ["arabic_reshaper", "bidi.algorithm"]
 
+# المحرك الداخلي للمساعد الذكي (llama.cpp) — اختياري: إن لم يكن مثبّتاً يُبنى البرنامج بدونه
+try:
+    import llama_cpp  # noqa: F401
+    binaries += collect_dynamic_libs("llama_cpp")
+    datas += collect_data_files("llama_cpp")
+    hiddenimports += collect_submodules("llama_cpp") + collect_submodules("jinja2") + ["markupsafe", "diskcache"]
+except Exception:
+    pass
+
 a = Analysis(["run_dpp.py"], pathex=["."], binaries=binaries, datas=datas, hiddenimports=hiddenimports,
              excludes=["tkinter", "matplotlib", "scipy", "fontTools", "pytest", "IPython",
                        "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",

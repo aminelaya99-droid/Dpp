@@ -135,8 +135,26 @@ def run() -> int:
             raise RuntimeError("البيانات لم تُحفظ بعد إعادة الفتح")
         return "البيانات محفوظة"
 
+    def s_ai():
+        """المحرك الداخلي: مكتبة llama.cpp موجودة في البرنامج، ونموذج حقيقي يجيب إن أُعطي (DPP_SELFTEST_GGUF)."""
+        from .ai.provider import AIConfig, EmbeddedProvider, embedded_status
+        ok, why = embedded_status()
+        if not ok:
+            raise RuntimeError(why)
+        gguf = os.environ.get("DPP_SELFTEST_GGUF", "")
+        if not gguf:
+            return "المكتبة موجودة (لا نموذج للتجربة)"
+        cfg = AIConfig(kind="embedded", model_path=gguf, num_ctx=2048, max_tokens=24)
+        prov = EmbeddedProvider("", cfg)
+        out = "".join(x for k, x in prov.chat([{"role": "user", "content": "قل: مرحبا"}]) if k == "text")
+        if not out.strip():
+            raise RuntimeError("النموذج لم يُرجع نصاً")
+        return f"النموذج أجاب: {out.strip()[:40]}"
+
+    ai_steps = [step("المساعد الذكي الداخلي", s_ai)] if (os.environ.get("DPP_SELFTEST_AI") or
+                                                       os.environ.get("DPP_SELFTEST_GGUF")) else []
     ok = all([step("إنشاء قاعدة البيانات", s_db), step("جدولة فترة كاملة", s_plan), step("الواجهة", s_ui),
-              step("التصدير", s_export), step("التصدير إلى aSc", s_asc), step("الطباعة الرسمية", s_official), step("النسخ الاحتياطي والاستعادة", s_backup), step("إعادة الفتح", s_reopen)])
+              step("التصدير", s_export), step("التصدير إلى aSc", s_asc), step("الطباعة الرسمية", s_official), step("النسخ الاحتياطي والاستعادة", s_backup), step("إعادة الفتح", s_reopen)] + ai_steps)
     text = "\n".join(report) + f"\n\nالنتيجة: {'نجاح' if ok else 'فشل'}\nمجلد الفحص: {tmp}\n"
     (tmp / "selftest_report.txt").write_text(text, encoding="utf-8")
     try:

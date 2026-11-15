@@ -1,7 +1,8 @@
-"""الاتصال بخدمة النماذج المحلية: Ollama أو LM Studio (أو أي خدمة متوافقة مع OpenAI).
+"""النماذج المحلية: المحرك الداخلي (llama.cpp داخل DPP) أو خدمة Ollama / LM Studio.
 
-لا مكتبات خارجية (urllib من Python يكفي) ولا إنترنت: كل الطلبات إلى 127.0.0.1،
-ووكيل الشبكة (proxy) معطّل صراحة حتى لا يُحوّل طلب المضيف المحلي.
+* الداخلي (1.8): ملف نموذج ‎.gguf‎ في مجلد «models» بجانب البرنامج (أو في مجلد البيانات)،
+  يُحمَّل في الذاكرة ويعمل على المعالج — بلا إنترنت وبلا أي برنامج آخر.
+* الخدمات: urllib فقط، وكل الطلبات إلى 127.0.0.1 مع تعطيل وكيل الشبكة.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ SETTING_KEY = "ai_config"
 
 # النوع ← (العنوان الافتراضي، الاسم المعروض)
 KINDS = {
+    "embedded": ("", "داخلي (llama.cpp)"),
     "ollama": ("http://127.0.0.1:11434", "Ollama"),
     "openai": ("http://127.0.0.1:1234/v1", "LM Studio / متوافق مع OpenAI"),
 }
@@ -47,11 +49,14 @@ class AIConfig:
     base_url: str = ""              # فارغ = العنوان الافتراضي للنوع
     model: str = ""
     temperature: float = 0.2
-    num_ctx: int = 4096             # يناسب 8 غيغا رام؛ أكبر = ذاكرة أكثر
+    num_ctx: int = 8192             # يتسع لقائمة الأدوات؛ نموذج 4B بـ Q4 + هذا السياق ≈ 4 غيغا رام
     timeout: int = 240
     max_rounds: int = 4             # أقصى عدد مناداة أدوات في سؤال واحد
     history: int = 6                # عدد الرسائل السابقة المُرسلة مع السؤال
     use_tools: bool = True          # مناداة الأدوات أصلاً (قراءة قاعدة البيانات)
+    model_path: str = ""            # الداخلي: ملف ‎.gguf‎ محدد (فارغ = أول نموذج في مجلد models)
+    threads: int = 0                # الداخلي: عدد أنوية المعالج (0 = تلقائي)
+    max_tokens: int = 900           # أقصى طول للجواب
 
     def url(self) -> str:
         if self.base_url:
@@ -275,25 +280,202 @@ def _as_args(raw) -> dict:
         return {}
 
 
-PROVIDER_CLASSES = {"ollama": OllamaProvider, "openai": OpenAIProvider}
+# ====================================================================== المحرك الداخلي
+def model_dirs() -> list:
+    """أين نبحث عن ملفات النماذج: «models» بجانب DPP.exe (أو جذر المشروع)، ثم مجلد البيانات."""
+    import sys
+    from pathlib import Path
+    from ..db.database import default_data_dir
+    if getattr(sys, "frozen", False):
+        app_dir = Path(sys.executable).resolve().parent
+    else:
+        app_dir = Path(__file__).resolve().parent.parent.parent
+    out = []
+    for d in (app_dir / "models", default_data_dir() / "models"):
+        if d not in out:
+            out.append(d)
+    return out
+
+
+def find_models(cfg: AIConfig | None = None) -> list:
+    """ملفات ‎.gguf‎ المتاحة (الأكبر أولاً لا يهم: الترتيب أبجدي). ملفات الرؤية (mmproj) مستبعدة."""
+    from pathlib import Path
+    seen, out = set(), []
+    if cfg is not None and cfg.model_path and Path(cfg.model_path).is_file():
+        p = Path(cfg.model_path)
+        seen.add(p.resolve())
+        out.append(p)
+    for d in model_dirs():
+        try:
+            files = sorted(d.glob("*.gguf"))
+        except OSError:
+            continue
+        for p in files:
+            if "mmproj" in p.name.lower() or p.resolve() in seen:
+                continue
+            try:
+                if p.stat().st_size < 20_000_000:          # ملف ناقص (تحميل لم يكتمل)
+                    continue
+            except OSError:
+                continue
+            seen.add(p.resolve())
+            out.append(p)
+    return out
+
+
+def cpu_supports_avx2() -> bool | None:
+    """Windows: هل يدعم المعالج AVX2 (المحرك مبني له)؟ None = لا نعرف."""
+    import os
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(40))   # PF_AVX2_INSTRUCTIONS_AVAILABLE
+    except Exception:
+        return None
+
+
+def embedded_status() -> tuple[bool, str]:
+    """(المحرك متاح؟، سبب عدم توفره)."""
+    try:
+        import llama_cpp  # noqa: F401
+    except Exception as e:                       # ImportError / OSError (DLL)
+        msg = "المحرك الداخلي غير موجود في هذه النسخة من البرنامج."
+        if cpu_supports_avx2() is False:
+            msg = "معالج هذا الجهاز لا يدعم تعليمات AVX2 التي يحتاجها المحرك الداخلي."
+        return False, f"{msg}\n({type(e).__name__}: {e})"
+    return True, ""
+
+
+_LLM_CACHE: dict = {}
+_LLM_LOCK = None
+
+
+def _llm_lock():
+    global _LLM_LOCK
+    if _LLM_LOCK is None:
+        import threading
+        _LLM_LOCK = threading.Lock()
+    return _LLM_LOCK
+
+
+class EmbeddedProvider(LocalProvider):
+    """llama.cpp داخل البرنامج: يحمّل ملف ‎.gguf‎ مرة واحدة ويبقيه في الذاكرة.
+
+    النماذج الصغيرة لا تدعم مناداة الأدوات بالصيغة الرسمية هنا، فالوكيل يستعمل الصيغة النصية
+    (TOOL: الاسم {…}) مباشرة (native_tools = False)."""
+
+    kind = "embedded"
+    native_tools = False
+
+    def __init__(self, base_url: str = "", cfg: AIConfig | None = None):
+        super().__init__(base_url or "local", cfg)
+
+    def models(self) -> list[str]:
+        ok, why = embedded_status()
+        if not ok:
+            raise AIError(why, offline=True)
+        files = find_models(self.cfg)
+        if not files:
+            raise AIError(no_model_message(), offline=True)
+        return [p.name for p in files]
+
+    def _path(self):
+        files = find_models(self.cfg)
+        if not files:
+            raise AIError(no_model_message(), offline=True)
+        if self.cfg.model:
+            for p in files:
+                if p.name == self.cfg.model:
+                    return p
+        return files[0]
+
+    def loaded(self) -> bool:
+        try:
+            p = self._path()
+        except AIError:
+            return False
+        return (str(p), self.cfg.num_ctx) in _LLM_CACHE
+
+    def llm(self):
+        ok, why = embedded_status()
+        if not ok:
+            raise AIError(why, offline=True)
+        p = self._path()
+        key = (str(p), self.cfg.num_ctx)
+        with _llm_lock():
+            if key not in _LLM_CACHE:
+                import os
+                from llama_cpp import Llama
+                _LLM_CACHE.clear()                     # نموذج واحد في الذاكرة
+                threads = self.cfg.threads or max(1, min(8, (os.cpu_count() or 4) - 1))
+                try:
+                    _LLM_CACHE[key] = Llama(model_path=str(p), n_ctx=self.cfg.num_ctx, n_threads=threads,
+                                            n_batch=256, verbose=False)
+                except MemoryError as e:
+                    raise AIError("الذاكرة غير كافية لتحميل النموذج. أغلق برامج أخرى أو اختر نموذجاً أصغر.") from e
+                except Exception as e:
+                    raise AIError(f"تعذّر تحميل النموذج {p.name}: {type(e).__name__}: {e}\n"
+                                  "تأكد أن الملف اكتمل تحميله وأنه بصيغة GGUF.") from e
+            return _LLM_CACHE[key]
+
+    def chat(self, messages, tools=None, cancel=None):
+        llm = self.llm()
+        text = []
+        try:
+            stream = llm.create_chat_completion(messages=messages, stream=True, temperature=self.cfg.temperature,
+                                                max_tokens=self.cfg.max_tokens)
+            for chunk in stream:
+                if cancel and cancel():
+                    break
+                for ch in chunk.get("choices") or []:
+                    piece = (ch.get("delta") or {}).get("content") or ""
+                    if piece:
+                        text.append(piece)
+                        yield ("text", piece)
+        except AIError:
+            raise
+        except ValueError as e:                        # تجاوز طول السياق
+            if "context" in str(e).lower() or "token" in str(e).lower():
+                raise AIError("السؤال والمحادثة أطول من ذاكرة النموذج. اضغط «محادثة جديدة» وأعد السؤال.") from e
+            raise AIError(f"المحرك الداخلي: {e}") from e
+        except Exception as e:
+            raise AIError(f"المحرك الداخلي: {type(e).__name__}: {e}") from e
+        yield ("end", {"content": "".join(text), "tool_calls": []})
+
+
+RECOMMENDED_MODEL = ("Qwen3-4B-Instruct-2507 (Q4_K_M)، حوالي 2.5 GB، "
+                     "ابحث عنه في huggingface.co باسم: Qwen3-4B-Instruct-2507-GGUF")
+
+
+def no_model_message() -> str:
+    dirs = "\n".join(f"  • {d}" for d in model_dirs())
+    return ("لا يوجد ملف نموذج (‎.gguf‎) بعد.\n"
+            f"ضع ملف النموذج في أحد هذه المجلدات ثم اضغط «فحص»:\n{dirs}\n"
+            f"النموذج المقترح لجهاز بـ 8 غيغا: {RECOMMENDED_MODEL}.\n"
+            "أو اضغط «اختيار ملف النموذج…» إن كان الملف في مكان آخر.")
+
+
+PROVIDER_CLASSES = {"embedded": EmbeddedProvider, "ollama": OllamaProvider, "openai": OpenAIProvider}
 
 
 def make_provider(cfg: AIConfig) -> LocalProvider:
-    """مزوّد جاهز حسب الإعدادات؛ في الوضع التلقائي يكشف الخدمة المشتغلة."""
+    """مزوّد جاهز حسب الإعدادات. التلقائي: الداخلي إن وُجد نموذج، وإلا أول خدمة مشتغلة."""
     if cfg.kind in PROVIDER_CLASSES:
         return PROVIDER_CLASSES[cfg.kind](cfg.url(), cfg)
+    if embedded_status()[0] and find_models(cfg):
+        return EmbeddedProvider("", cfg)
     found = detect(cfg)
     if not found:
-        raise AIError(
-            "لم أجد خدمة نماذج محلية مشتغلة.\n"
-            "نصّب Ollama ثم شغّل:  ollama pull qwen3:4b\n"
-            "أو شغّل LM Studio وفعّل الخدمة المحلية (Local Server).", offline=True)
+        raise AIError(no_model_message() + "\n\nأو شغّل Ollama / LM Studio إن كانا مثبّتين.", offline=True)
     kind, base = found
     return PROVIDER_CLASSES[kind](base, cfg)
 
 
 def detect(cfg: AIConfig | None = None) -> tuple[str, str] | None:
-    """أول خدمة محلية مشتغلة: (النوع، العنوان) أو None."""
+    """أول مصدر متاح: الداخلي إن وُجد نموذج، وإلا أول خدمة محلية مشتغلة: (النوع، العنوان) أو None."""
+    if embedded_status()[0] and find_models(cfg):
+        return "embedded", "local"
     for kind, base in PROBES:
         probe = PROVIDER_CLASSES[kind](base, cfg)
         try:

@@ -1,4 +1,4 @@
-# DPP — برنامج تسيير الجداول الزمنية والتكوين (الإصدار 1.6)
+# DPP — برنامج تسيير الجداول الزمنية والتكوين (الإصدار 1.8)
 
 برنامج سطح مكتب Windows لمدرسة تكوين: الجدول العام (مثل aSc)، المخطط الأسبوعي، البرمجة الآلية، المقرر والتقدم،
 الطباعة الرسمية بقوالب، الخفارة والخدمات، الأسابيع. صاحب المشروع: **Amine**.
@@ -19,14 +19,17 @@
 ```bash
 pip install -r requirements-dev.txt          # Python 3.12 (64-bit)
 python run_dpp.py                             # تشغيل البرنامج
-QT_QPA_PLATFORM=offscreen python -m pytest -q tests     # 117 اختباراً (~3 دقائق)
+QT_QPA_PLATFORM=offscreen python -m pytest -q tests     # 135 اختباراً تقريباً
+pip install -r requirements-ai.txt            # اختياري: المحرك الداخلي (يحتاج Build Tools + CMake و CMAKE_ARGS)
+python scripts/ai_eval.py model.gguf          # تجربة المساعد بنموذج حقيقي
 python run_dpp.py --selftest                  # الفحص الذاتي (يعمل من DPP.exe أيضاً)
 pyinstaller --noconfirm dpp.spec              # dist/DPP/DPP.exe
 ```
 
 - على Windows: `run_dev.bat` للتشغيل، `build_exe.bat` للبناء الكامل (بيئة + اختبارات + exe).
-- **GitHub Actions** (`.github/workflows/build-windows.yml`): كل push يشغّل الاختبارات ويبني `DPP.exe` على Windows
-  ويرفعه كـ Artifact (`DPP-windows`)؛ وسم `v1.7.0` مثلاً يُنشئ Release فيه zip جاهز.
+- **GitHub Actions** (`.github/workflows/build-windows.yml`): `build` (اختبارات + بناء + فحص ذاتي من exe)،
+  `verify` (يحمّل الملف المرفوع نفسه + نموذج صغير حقيقي ويشغّل الفحص الذاتي)، `ai-eval` (النموذج الموصى به على أسئلة حقيقية).
+  الرفع بـ `include-hidden-files: true` (مجلد `ortools/.libs`!). وسم `v1.8.0` مثلاً يُنشئ Release فيه zip جاهز.
 - مجلد البيانات: `DPP_DATA_DIR` (وإلا مجلد المستخدم). قاعدة SQLite واحدة + «قوالب Word».
 - بيانات المؤسسة الحقيقية للاختبارات في `tests/data/` (ملفات .roz للأسابيع 1–8، المخطط الزمني) والمقرر في
   `dpp/assets/curriculum/`. الاختبارات التي تحتاجها تُتخطى إذا غابت، والبرنامج يعمل بدون ملف المقرر (يُستورد من صفحة المقرر).
@@ -54,7 +57,8 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 | `dpp/exporters/word_tpl.py`, `ui/word_ui.py` | قوالب Word لكل طور/قسم: توليد، فحص، ملء، مراقبة الحفظ في Word |
 | `dpp/exporters/word_pdf.py`, `week_export.py` | PDF عبر Word (PowerShell COM) وتصدير الأسبوع كاملاً |
 | `dpp/services/weeks.py`, `ui/pages/weeks_page.py` | صفحة الأسابيع |
-| `dpp/ai/provider.py`, `tools.py`, `agent.py` | المساعد الذكي المحلي: Ollama/LM Studio، أدوات قراءة (SELECT فقط)، حلقة سؤال←أدوات←جواب |
+| `dpp/ai/provider.py`, `tools.py`, `agent.py` | المساعد الذكي: المحرك الداخلي llama.cpp (`EmbeddedProvider`، ملف ‎.gguf‎ في `models`) أو Ollama/LM Studio، أدوات قراءة، حلقة سؤال←أدوات←جواب |
+| `dpp/ai/actions.py` | أدوات `propose_*`: تحسب التغيير وتُنشئ `Proposal` بلا كتابة؛ `apply/undo` في خيط الواجهة (عبر WeekGrid للتراجع) |
 | `dpp/ui/pages/assistant.py` + `ai/standalone.py` | صفحة المساعد (خيط منفصل + `open_reader`)، والنافذة المستقلة `python -m dpp.ai` |
 | `dpp/services/duty.py`, `ui/pages/duty_page.py` | الخفارة والخدمات (نظام منفصل عن الجدول) |
 | `dpp/services/fullday.py`, `calendar.py` | بطاقات اليوم الكامل، الأحداث والأيام المحجوبة |
@@ -91,6 +95,10 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 - كل عملية في الجدول العام تمر عبر `grid._push` (للتراجع)، والعمليات المركبة داخل `begin_group/end_group`.
 - بعد أي تعديل للبيانات: `ctx.changed("<المجال>")` لتحديث الصفحات.
 - الاختبارات الواجهية تعمل بـ `QT_QPA_PLATFORM=offscreen`؛ لا تفتح نوافذ modal في الاختبارات (استعمل monkeypatch).
+- **المساعد الذكي (1.8):** أدوات `propose_*` لا تكتب أبداً (اختبار يعدّ الأسطر)؛ الكتابة فقط في `actions.apply` بعد زر «تطبيق».
+  المحرك الداخلي لا يدعم مناداة الأدوات الرسمية → صيغة نصية `TOOL: name {...}` (`native_tools=False`).
+  llama-cpp-python يُبنى في CI بـ `CMAKE_ARGS` (AVX2 عام، بلا OpenMP)؛ لا تضف `GGML_NATIVE`.
+  برمجة الأسابيع: النموذج يمرّر الأولويات فقط، ومحرك OR-Tools يبني الجدول.
 - **المساعد الذكي:** أدوات `dpp/ai/tools.py` تقرأ فقط (اختبار يقارن عدد الأسطر قبل/بعد). النموذج يعمل في
   خيط منفصل باتصال `open_reader` خاص: لا تُشارك اتصال sqlite بين خيطين. الإعدادات JSON في
   `settings['ai_config']` (بلا ترحيل). نص فيه أقواس JSON لا يُمرَّر إلى `str.format`.
@@ -99,4 +107,4 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 
 ## التاريخ
 
-الإصدارات وتفاصيلها في `README.md` و`docs/releases/`. آخر إصدار: **1.7.0** (09/11/2026) — المساعد الذكي المحلي (قراءة فقط؛ التعديل في 1.8).
+الإصدارات وتفاصيلها في `README.md` و`docs/releases/`. آخر إصدار: **1.8.0** (15/11/2026) — المساعد الذكي الداخلي (llama.cpp) واقتراحات التعديل بالموافقة.

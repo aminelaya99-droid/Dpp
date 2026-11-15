@@ -1,0 +1,5 @@
+# المحرك الداخلي للمساعد الذكي (llama.cpp على المعالج).
+# لا توجد له حزم Windows جاهزة في PyPI، فيُبنى من المصدر (يحتاج Visual Studio Build Tools + CMake).
+# مهم: يُبنى لمعالجات AVX2 عامة لا لمعالج جهاز البناء:
+#   set CMAKE_ARGS=-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF -DGGML_OPENMP=OFF
+llama-cpp-python==0.3.16

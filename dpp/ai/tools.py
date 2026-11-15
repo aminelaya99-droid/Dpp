@@ -1,14 +1,14 @@
 """أدوات قراءة قاعدة البيانات التي ينادِيها النموذج المحلي.
 
-قاعدة صارمة: كل أداة هنا **تقرأ فقط** (SELECT) ولا تعدّل أي شيء. الكتابة (نقل حصة،
-برمجة أسبوع…) ستأتي في إصدار لاحق عبر اقتراح + تأكيد صريح من المستخدم.
+قاعدة صارمة: كل أداة هنا **تقرأ فقط** (SELECT) ولا تعدّل أي شيء. التعديل (نقل حصة، برمجة أسبوع…)
+في actions.py: أدوات propose_* تحسب التغيير وتُنشئ اقتراحاً، ولا يُكتب شيء إلا بزر «تطبيق».
 
 المخرجات نصوص عربية مختصرة (لا JSON): النموذج 4B على جهاز بـ 8 غيغا لا يتحمل سياقاً كبيراً،
 فكل أداة تعيد أسطراً قصيرة وتقصّ الزائد.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable
 
@@ -24,6 +24,8 @@ class Env:
     db: object
     formation_ids: list[int]
     today: date
+    proposals: list = field(default_factory=list)     # اقتراحات التعديل (1.8) تنتظر موافقة المستخدم
+    cache: dict = field(default_factory=dict)
 
     def fids(self) -> list[int]:
         if self.formation_ids:

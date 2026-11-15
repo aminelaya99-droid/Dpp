@@ -22,22 +22,23 @@ from ..context import AppContext
 from ..widgets import icon
 
 SUGGESTIONS = [
-    "ما جدول القسم الأول هذا الأسبوع؟",
-    "من الأساتذة الفارغون غداً من 08:00 إلى 10:00؟",
     "ما المواد المتأخرة عن المقرر؟",
-    "هل يوجد تعارض هذا الأسبوع؟",
-    "لخّص تقدم كل الأقسام.",
+    "هل يوجد تعارض هذا الأسبوع؟ اقترح إصلاحه.",
+    "من الأساتذة الفارغون غداً من 08:00 إلى 10:00؟",
+    "اكتب ملخصاً لتقدم كل الأقسام.",
+    "برمج الأسبوع القادم مع التركيز على المواد المتأخرة.",
 ]
 
-HELP_OFFLINE = (
-    "خدمة النماذج المحلية غير مشتغلة.\n\n"
-    "الطريقة الأسهل (مرة واحدة):\n"
-    "١. نصّب Ollama من ollama.com (نسخة Windows).\n"
-    "٢. افتح موجّه الأوامر واكتب:  ollama pull qwen3:4b\n"
-    "٣. اضغط «فحص الخدمة» هنا.\n\n"
-    "أو شغّل LM Studio وفعّل فيه الخدمة المحلية (Local Server).\n"
-    "كل شيء يبقى على جهازك: لا إنترنت بعد تحميل النموذج، ولا بيانات تخرج."
-)
+SOURCES = [("auto", "تلقائي"), ("embedded", "داخلي (ملف النموذج)"), ("ollama", "Ollama"),
+           ("openai", "LM Studio / متوافق")]
+
+
+def help_offline() -> str:
+    from ...ai.provider import embedded_status, no_model_message
+    ok, why = embedded_status()
+    head = no_model_message() if ok else why
+    return (head + "\n\nكل شيء يبقى على جهازك: لا إنترنت ولا بيانات تخرج.\n"
+            "(بديل: Ollama أو LM Studio إن كانا مثبّتين، ثم «فحص».)")
 
 
 # ---------------------------------------------------------------- العامل في الخيط
@@ -47,6 +48,7 @@ class AskWorker(QObject):
     tool = Signal(str)
     done = Signal(str)
     failed = Signal(str)
+    proposal = Signal(object)
 
     def __init__(self, db_path, cfg, formation_ids, question: str, history: list[Turn]):
         super().__init__()
@@ -74,6 +76,8 @@ class AskWorker(QObject):
                     self.tool.emit(payload)
                 elif kind == "note":
                     self.note.emit(payload)
+                elif kind == "proposal":
+                    self.proposal.emit(payload)
                 elif kind == "end":
                     text = payload
             self.done.emit(text)
@@ -101,7 +105,7 @@ class ProbeWorker(QObject):
     def run(self):
         found, models = None, []
         try:
-            if self.cfg.kind in ("ollama", "openai"):
+            if self.cfg.kind in ("ollama", "openai", "embedded"):
                 from ...ai.provider import PROVIDER_CLASSES
                 prov = PROVIDER_CLASSES[self.cfg.kind](self.cfg.url(), self.cfg)
                 models = prov.models()                 # يرفع AIError إن كانت متوقفة
@@ -122,7 +126,6 @@ class Bubble(QFrame):
         super().__init__()
         self.role = role
         self.setObjectName("ChatUser" if role == "user" else "ChatBot")
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 9, 12, 9)
         lay.setSpacing(4)
@@ -150,12 +153,101 @@ class Bubble(QFrame):
     def text(self) -> str:
         return self._text
 
+    def add_actions(self, page):
+        """أزرار تحت جواب نصي: نسخ، فتح في Word."""
+        if getattr(self, "_acts", False):
+            return
+        self._acts = True
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        for ic, lab, fn in (("mdi6.content-copy", "نسخ", lambda: page.copy_text(self._text)),
+                            ("mdi6.microsoft-word", "فتح في Word", lambda: page.to_word(self._text))):
+            b = QPushButton(icon(ic), lab)
+            b.setFlat(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch()
+        self.layout().addLayout(row)
+
     def add_note(self, note: str):
         if note in self._notes:
             return
         self._notes.append(note)
         self.steps.setText(" · ".join(self._notes))
         self.steps.show()
+
+
+class ProposalCard(QFrame):
+    """بطاقة اقتراح: التغييرات بالضبط والتحذيرات، مع «تطبيق» و«تجاهل» ثم «تراجع»."""
+
+    def __init__(self, prop, page):
+        super().__init__()
+        self.prop, self.page = prop, page
+        self.setObjectName("Card")
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setMaximumWidth(720)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(4)
+        t = QLabel(f"اقتراح {prop.id}: {prop.title}")
+        t.setStyleSheet("font-weight: bold;")
+        t.setWordWrap(True)
+        lay.addWidget(t)
+        body = "\n".join(f"• {x}" for x in prop.lines[:20])
+        if len(prop.lines) > 20:
+            body += f"\n… و{len(prop.lines) - 20} تغييراً آخر"
+        lb = QLabel(body)
+        lb.setWordWrap(True)
+        lb.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(lb)
+        if prop.warnings:
+            w = QLabel("تنبيه: " + "؛ ".join(prop.warnings[:6]))
+            w.setWordWrap(True)
+            w.setStyleSheet("color: #B45309;")
+            lay.addWidget(w)
+        self.status = QLabel("لم يُطبَّق بعد — لا شيء تغيّر.")
+        self.status.setObjectName("Muted")
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        row = QHBoxLayout()
+        self.b_apply = QPushButton(icon("mdi6.check"), "تطبيق")
+        self.b_apply.clicked.connect(self.apply)
+        self.b_skip = QPushButton(icon("mdi6.close"), "تجاهل")
+        self.b_skip.clicked.connect(self.skip)
+        self.b_undo = QPushButton(icon("mdi6.undo"), "تراجع")
+        self.b_undo.clicked.connect(self.undo)
+        self.b_undo.hide()
+        for b in (self.b_apply, self.b_skip, self.b_undo):
+            row.addWidget(b)
+        row.addStretch()
+        lay.addLayout(row)
+
+    def apply(self):
+        try:
+            msg = self.page.apply_proposal(self.prop)
+        except Exception as e:
+            self.status.setText(f"تعذّر التطبيق: {e}")
+            return
+        self.status.setText(msg)
+        self.b_apply.hide()
+        self.b_skip.hide()
+        self.b_undo.show()
+
+    def skip(self):
+        self.prop.state = "dismissed"
+        self.status.setText("تُجوهل الاقتراح.")
+        self.b_apply.hide()
+        self.b_skip.hide()
+
+    def undo(self):
+        try:
+            msg = self.page.undo_proposal(self.prop)
+        except Exception as e:
+            self.status.setText(f"تعذّر التراجع: {e}")
+            return
+        self.status.setText(msg)
+        self.b_undo.hide()
 
 
 # ---------------------------------------------------------------- الصفحة
@@ -235,13 +327,24 @@ class AssistantPage(QWidget):
         self.state.setObjectName("Muted")
         h.addWidget(self.state)
         h.addStretch()
+        self.source = QComboBox()
+        for k, lab in SOURCES:
+            self.source.addItem(lab, k)
+        self.source.setCurrentIndex(max(0, self.source.findData(self.cfg.kind)))
+        self.source.setToolTip("مصدر النموذج: الداخلي يعمل داخل DPP من ملف ‎.gguf‎ بلا أي برنامج آخر")
+        self.source.currentIndexChanged.connect(self._source_changed)
+        h.addWidget(self.source)
         self.models = QComboBox()
         self.models.setMinimumWidth(190)
-        self.models.setToolTip("النموذج المستعمل من الخدمة المحلية")
+        self.models.setToolTip("النموذج المستعمل")
         self.models.currentTextChanged.connect(self._model_changed)
         h.addWidget(QLabel("النموذج:"))
         h.addWidget(self.models)
-        b = QPushButton(icon("mdi6.lan-connect"), "فحص الخدمة")
+        f = QPushButton(icon("mdi6.file-download-outline"), "ملف النموذج…")
+        f.setToolTip("اختيار ملف نموذج ‎.gguf‎ من أي مكان، أو فتح مجلد النماذج")
+        f.clicked.connect(self._model_file_menu)
+        h.addWidget(f)
+        b = QPushButton(icon("mdi6.lan-connect"), "فحص")
         b.clicked.connect(lambda: self.probe(force=True))
         h.addWidget(b)
         if not standalone:
@@ -287,13 +390,13 @@ class AssistantPage(QWidget):
     @Slot(object, object)
     def _probed_done(self, found, models):
         if not found:
-            self.state.setText("الخدمة المحلية متوقفة")
+            self.state.setText("لا يوجد نموذج جاهز")
             self.models.clear()
             if getattr(self, "_probe_force", False):
-                self._bot(HELP_OFFLINE)
+                self._bot(help_offline())
             return
         kind, base = found
-        label = {"ollama": "Ollama", "openai": "LM Studio / متوافق"}.get(kind, kind)
+        label = {"ollama": "Ollama", "openai": "LM Studio / متوافق", "embedded": "المحرك الداخلي"}.get(kind, kind)
         if not models:
             self.models.clear()
             self.state.setText(f"{label} مشتغل لكن بلا نماذج")
@@ -320,6 +423,47 @@ class AssistantPage(QWidget):
         self.probe_thread = None
         self._probe_worker = None
 
+    def _source_changed(self, *_):
+        self.cfg.kind = self.source.currentData()
+        save_config(self.ctx.db, self.cfg)
+        self.probe(force=True)
+
+    def _model_file_menu(self):
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
+        m = QMenu(self)
+        m.addAction(icon("mdi6.file-search-outline"), "اختيار ملف نموذج (‎.gguf‎)…", self._pick_model_file)
+        m.addAction(icon("mdi6.folder-open-outline"), "فتح مجلد النماذج", self._open_models_dir)
+        m.addAction(icon("mdi6.information-outline"), "أي نموذج أحمّل؟", lambda: self._bot(help_offline()))
+        m.exec(QCursor.pos())
+
+    def _pick_model_file(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "ملف النموذج", "", "GGUF (*.gguf)")
+        if not path:
+            return
+        from pathlib import Path
+        self.cfg.model_path = path
+        self.cfg.model = Path(path).name
+        self.cfg.kind = "embedded"
+        save_config(self.ctx.db, self.cfg)
+        self.source.blockSignals(True)
+        self.source.setCurrentIndex(max(0, self.source.findData("embedded")))
+        self.source.blockSignals(False)
+        self.probe(force=True)
+
+    def _open_models_dir(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from ...ai.provider import model_dirs
+        d = model_dirs()[0]
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            d = model_dirs()[-1]
+            d.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(d)))
+
     def _model_changed(self, name: str):
         if name and name != self.cfg.model:
             self.cfg.model = name
@@ -328,21 +472,38 @@ class AssistantPage(QWidget):
     # ------------------------------------------------------------------ الدردشة
     def _welcome(self):
         names = "، ".join(t.name for t in AT.REGISTRY.values())
-        self._bot("مرحباً. أجيب عن أسئلتك انطلاقاً من بيانات البرنامج نفسه: الجدول، الأساتذة، القاعات، "
-                  "المقرر والتقدم، التعارضات، الخفارة والغيابات.\n"
-                  "في هذا الإصدار أقرأ البيانات فقط ولا أعدّلها.\n"
-                  f"أدواتي: {names}")
+        self._bot("مرحباً. أجيب عن أسئلتك من بيانات البرنامج نفسه (الجدول، الأساتذة، القاعات، المقرر والتقدم، "
+                  "التعارضات، الخفارة)، وأشرح وأحلّل، وأكتب النصوص (ملاحظات، ملخصات، رسائل).\n"
+                  "وأقترح التعديلات: نقل حصة، إضافة حصة، إكمال أسبوع قسم، إصلاح التعارضات، توزيع الخفارة، "
+                  "وبرمجة أسبوع كامل بمحرك البرنامج.\n"
+                  "لا يتغيّر شيء إلا بعد أن تضغط «تطبيق» على بطاقة الاقتراح، ويمكنك التراجع.")
+        del names
+
+    def _put(self, w: QWidget, right: bool, max_w: int = 820):
+        """سطر في المحادثة: الفقاعة تأخذ العرض المتاح حتى max_w (لا محاذاة على الفقاعة نفسها:
+        مع نص ملتف كانت تأخذ عرض تلميحها الصغير فيُقصّ النص)."""
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        w.setMaximumWidth(max_w)
+        w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        if right:                      # الاتجاه RTL: أول عنصر على اليمين
+            h.addWidget(w, 1)
+            h.addStretch(0)
+        else:
+            h.addStretch(0)
+            h.addWidget(w, 1)
+        self.chat.insertWidget(self.chat.count() - 1, row)
+        self._scroll_down()
 
     def _bot(self, text: str) -> Bubble:
         b = Bubble("bot", text)
-        self.chat.insertWidget(self.chat.count() - 1, b, 0, Qt.AlignRight)
-        self._scroll_down()
+        self._put(b, True)
         return b
 
     def _user(self, text: str) -> Bubble:
         b = Bubble("user", text)
-        self.chat.insertWidget(self.chat.count() - 1, b, 0, Qt.AlignLeft)
-        self._scroll_down()
+        self._put(b, False, 640)
         return b
 
     def _scroll_down(self):
@@ -383,6 +544,7 @@ class AssistantPage(QWidget):
         self.worker.chunk.connect(self._on_chunk)
         self.worker.tool.connect(self._on_note)
         self.worker.note.connect(self._on_note)
+        self.worker.proposal.connect(self._on_proposal)
         self.worker.done.connect(self._on_done)
         self.worker.failed.connect(self._on_failed)
         self.worker.done.connect(self.thread.quit)
@@ -409,12 +571,72 @@ class AssistantPage(QWidget):
         if self.cur is not None:
             self.cur.add_note(note)
 
+    @Slot(object)
+    def _on_proposal(self, prop):
+        self._put(ProposalCard(prop, self), True, 760)
+
     @Slot(str)
     def _on_done(self, text: str):
         if self.cur is not None:
             if not self.cur.text().strip():
                 self.cur.set_text(text or "لم يُرجع النموذج جواباً. جرّب صياغة أقصر أو نموذجاً آخر.")
             self.history.append(Turn("assistant", self.cur.text()))
+            if len(self.cur.text()) > 40:
+                self.cur.add_actions(self)
+
+    # ------------------------------------------------------------------ تنفيذ الاقتراحات
+    def main_window(self):
+        for w in QApplication.topLevelWidgets():
+            if hasattr(w, "pages") and hasattr(w, "show_page"):
+                return w
+        return None
+
+    def apply_proposal(self, prop) -> str:
+        """ينفّذ الاقتراح في خيط الواجهة. نقل/إضافة الحصص تمر بالجدول العام (Ctrl+Z يعمل هناك)."""
+        from ...ai import actions as AA
+        grid, page = None, None
+        win = self.main_window()
+        if win is not None and "master" in getattr(win, "pages", {}):
+            page = win.pages["master"]
+            if getattr(page, "grid", None) is not None and page.grid.ws == prop.ws:
+                grid = page.grid
+        msg = AA.apply(self.ctx.db, prop, grid)
+        if page is not None and grid is not None:
+            page.rebuild()
+        self.ctx.changed("sessions_grid" if prop.kind in ("move", "add", "fill", "fix") else
+                         {"plan": "sessions", "duty": "duty", "note": "weeks"}.get(prop.kind, "*"))
+        return msg
+
+    def undo_proposal(self, prop) -> str:
+        from ...ai import actions as AA
+        msg = AA.undo(self.ctx.db, prop)
+        win = self.main_window()
+        if win is not None and "master" in getattr(win, "pages", {}):
+            try:
+                win.pages["master"].rebuild()
+            except Exception:
+                pass
+        self.ctx.changed("*")
+        return msg
+
+    def copy_text(self, text: str):
+        QApplication.clipboard().setText(text)
+
+    def to_word(self, text: str):
+        import tempfile
+        from pathlib import Path
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from docx import Document
+        from ...exporters.word_tpl import rtl_paragraph, style_run
+        doc = Document()
+        for line in text.splitlines():
+            p = doc.add_paragraph()
+            rtl_paragraph(p, "right")
+            style_run(p.add_run(line), size=12, font="Arial")
+        out = Path(tempfile.gettempdir()) / f"المساعد_{date.today().isoformat()}.docx"
+        doc.save(str(out))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
 
     @Slot(str)
     def _on_failed(self, message: str):

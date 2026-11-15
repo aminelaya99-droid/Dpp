@@ -12,6 +12,7 @@ from datetime import date
 from typing import Callable, Iterator
 
 from ..utils import iso, week_start
+from . import actions as A  # noqa: F401  (تسجيل أدوات الاقتراح)
 from . import tools as T
 from .provider import AIConfig, AIError, load_config, make_provider
 
@@ -23,11 +24,19 @@ SYSTEM = """أنت «مساعد DPP» داخل برنامج تسيير جداو�
 أجب بالعربية الفصحى البسيطة وباختصار شديد، بلا مقدمات ولا اعتذار.
 لا تخترع شيئاً: كل اسم أو رقم في جوابك يجب أن يكون جاء من نتيجة أداة. إن لم تجد المعلومة فقل ذلك.
 إن احتجت بيانات، نادِ أداة واحدة وانتظر نتيجتها قبل أن تنادي غيرها.
-أنت تقرأ البيانات فقط ولا تستطيع تعديلها في هذا الإصدار؛ إن طُلب منك تعديل، فاشرح للمستخدم في أي صفحة يفعله.
+للتعديل (نقل حصة، إضافة حصة، إكمال أسبوع قسم، إصلاح التعارضات، الخفارة، برمجة أسبوع، ملاحظة أسبوع)
+استعمل أدوات propose_*: هي تُنشئ اقتراحاً ولا تنفّذ شيئاً. لا تقل أبداً «تم التنفيذ»؛ قل إن الاقتراح جاهز
+وإن المستخدم يطبّقه بزر «تطبيق» تحت الجواب.
+لبرمجة أسبوع استعمل propose_week_plan: المحرك هو من يبني الجدول، وأنت تمرّر له المواد والساعات المطلوبة.
+عند طلب نص (ملاحظة، ملخص، رسالة، تقرير) اكتبه بعربية سليمة ومنظمة اعتماداً على نتائج الأدوات.
+عند طلب شرح أو تحليل: اقرأ البيانات بالأدوات ثم اشرح الأسباب باختصار واقترح حلاً.
+يفهم المستخدم ويكتب بالدارجة الجزائرية أحياناً: افهمها وأجب بالفصحى البسيطة.
 الأسبوع يبدأ يوم الأحد."""
 
 FALLBACK_HINT = """لمناداة أداة اكتب سطراً واحداً فقط بهذا الشكل ثم توقف فوراً:
 TOOL: اسم_الأداة {"المعامل": "القيمة"}
+مثال: TOOL: schedule {"scope": "section", "name": "BMP2-1"}
+المعاملات بنجمة * إلزامية.
 الأدوات المتاحة:
 __TOOLS__"""
 
@@ -103,6 +112,8 @@ class Agent:
     def provider(self):
         if self._provider is None:
             self._provider = make_provider(self.cfg)
+        if getattr(self._provider, "native_tools", True) is False:
+            self.fallback = True                     # المحرك الداخلي: صيغة الأدوات النصية مباشرة
         if not self.cfg.model:                       # لم يُختر نموذج: نأخذ أنسب موجود
             models = self._provider.models()
             if not models:
@@ -120,7 +131,7 @@ class Agent:
         head += (f"\nاليوم {iso(self.env.today)} ({T.DAYS[(self.env.today.weekday() + 1) % 7]})، "
                  f"الأسبوع رقم {week_number(self.db, self.env.today)} يبدأ {iso(ws)}.")
         if self.fallback:
-            lst = "\n".join(f"- {t.name}: {t.desc}" for t in T.REGISTRY.values())
+            lst = "\n".join(f"- {t.name}({_params(t)}): {t.desc}" for t in T.REGISTRY.values())
             head += "\n" + FALLBACK_HINT.replace("__TOOLS__", lst)
         return head
 
@@ -135,8 +146,11 @@ class Agent:
     def ask(self, question: str, history: list[Turn] | None = None,
             cancel: Callable[[], bool] | None = None) -> Iterator[tuple]:
         """مولّد أحداث: ("tool", وصف) و("text", قطعة) و("note", ملاحظة) و("end", الجواب الكامل)."""
+        prov = self.provider()
+        if hasattr(prov, "loaded") and not prov.loaded():
+            yield ("note", "تحميل النموذج في الذاكرة… (أول سؤال فقط، قد يأخذ دقيقة)")
         msgs = self.messages(question, history)
-        specs = T.specs() if self.cfg.use_tools else None
+        specs = T.specs() if self.cfg.use_tools and not self.fallback else None
         answer: list[str] = []
         for _round in range(max(1, self.cfg.max_rounds)):
             if cancel and cancel():
@@ -161,7 +175,10 @@ class Agent:
             msgs.append({"role": "assistant", "content": content.strip() or f"سأستعمل: {names}"})
             for call in calls:
                 yield ("tool", _tool_label(call))
+                n_before = len(self.env.proposals)
                 result = T.run(self.env, call["name"], call["args"])
+                for prop in self.env.proposals[n_before:]:
+                    yield ("proposal", prop)
                 msgs.append({"role": "user",
                              "content": f"نتيجة الأداة {call['name']}:\n{result}\n\n"
                                         "أجب الآن على سؤالي بالعربية وباختصار اعتماداً على هذه النتيجة، "
@@ -250,11 +267,17 @@ def _parse_text_calls(text: str) -> tuple[list[dict], str]:
     return [{"name": m.group(1), "args": args}], (text[:m.start()] + text[m.end():]).strip()
 
 
+def _params(t) -> str:
+    req = set(t.params.get("required") or [])
+    return ", ".join(f"{k}{'*' if k in req else ''}" for k in t.params.get("properties", {}))
+
+
 def _tool_label(call: dict) -> str:
     t = T.REGISTRY.get(call["name"])
-    label = (t.desc.split(":")[0].split(".")[0] if t else call["name"])[:48]
+    label = (t.desc.split(":")[0].split(".")[0].split("(")[0] if t else call["name"])[:48]
     args = "، ".join(f"{v}" for v in (call.get("args") or {}).values() if isinstance(v, (str, int, float)))
-    return f"يقرأ: {label}" + (f" ({args})" if args else "")
+    verb = "يُعدّ اقتراحاً" if call["name"].startswith("propose_") else "يقرأ"
+    return f"{verb}: {label.strip()}" + (f" ({args})" if args else "")
 
 
 def _pick(models: list[str]) -> str:
