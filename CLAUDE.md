@@ -1,4 +1,4 @@
-# DPP — برنامج تسيير الجداول الزمنية والتكوين (الإصدار 1.8)
+# DPP — برنامج تسيير الجداول الزمنية والتكوين (الإصدار 1.9)
 
 برنامج سطح مكتب Windows لمدرسة تكوين: الجدول العام (مثل aSc)، المخطط الأسبوعي، البرمجة الآلية، المقرر والتقدم،
 الطباعة الرسمية بقوالب، الخفارة والخدمات، الأسابيع. صاحب المشروع: **Amine**.
@@ -53,6 +53,7 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 | `dpp/services/progress.py`, `progress_reports.py`, `ui/pages/progress_views.py` | المقرر والتقدم والتقارير وExcel |
 | `dpp/exporters/official.py` | ورقة القسم الرسمية (`build_section_sheet` → `Sheet` بخانات `SheetCell`) |
 | `dpp/exporters/layout.py`, `ui/sheet_view.py`, `ui/sheet_design.py` | محرر الطباعة الواحد: المعاينة، النصوص الحرة، القوالب حسب النطاق، PDF |
+| `dpp/exporters/section_defaults.py`, `ui/section_tpl_ui.py`, `assets/print_templates/sections.json` | القوالب الافتراضية للأقسام (عام ← طور ← قسم) من 39 ورقة aSc: طبقة تحت قوالب المستخدم بلا كتابة في القاعدة، وشاشة المراجعة |
 | `dpp/exporters/report_sheet.py` | التقارير كأوراق في نفس المحرر (تقسيم الصفحات) |
 | `dpp/exporters/word_tpl.py`, `ui/word_ui.py` | قوالب Word لكل طور/قسم: توليد، فحص، ملء، مراقبة الحفظ في Word |
 | `dpp/exporters/word_pdf.py`, `week_export.py` | PDF عبر Word (PowerShell COM) وتصدير الأسبوع كاملاً |
@@ -65,7 +66,7 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 | `dpp/importers/` | aSc `.roz`، الأسابيع السابقة، المقرر، المخطط الزمني، Excel |
 | `dpp/ui/main_window.py`, `shell.py`, `theme.py` | النافذة، أنماط الواجهة، القائمة الجانبية (`PAGES`, `NAV_GROUPS`) |
 | `dpp/ui/colors.py` | ألوان المواد حسب العائلة + إعداد `card_colors` |
-| `tests/` | `conftest.py` (قاعدة تجريبية `seeded`)، اختبار لكل إصدار `test_v13..v16.py` |
+| `tests/` | `conftest.py` (قاعدة تجريبية `seeded`)، اختبار لكل إصدار `test_v13..v19.py` |
 
 ## قواعد المجال (متفق عليها)
 
@@ -95,6 +96,13 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 - كل عملية في الجدول العام تمر عبر `grid._push` (للتراجع)، والعمليات المركبة داخل `begin_group/end_group`.
 - بعد أي تعديل للبيانات: `ctx.changed("<المجال>")` لتحديث الصفحات.
 - الاختبارات الواجهية تعمل بـ `QT_QPA_PLATFORM=offscreen`؛ لا تفتح نوافذ modal في الاختبارات (استعمل monkeypatch).
+- **محرر نصوص الورقة (1.9):** كل نص يمر عبر `SheetScene._t`؛ تنسيقه في `layout["field_styles"]` (مفتاح النص، أو صنف
+  `cls:title/sub/day/…` لنصوص الجدول)، و«هذه الخانة فقط» في `cell_styles` المحفوظة لكل أسبوع (`official_cell_styles`)
+  ولا تدخل القالب أبداً. `None` في قالب أخص = إلغاء خاصية موروثة. المحاذاة التي يختارها المستخدم مطلقة (`_ALIGN_Q`).
+- **القوالب الافتراضية (1.9):** `base_styles` = «الأصل» الذي يرجع إليه المحرر؛ القالب المحفوظ فوق الافتراضي يحمل
+  `on_builtin` فيبقى الافتراضي تحته، والقالب المحفوظ قبل 1.9 (بلا العلامة) يعطّله لذلك القسم (إلا بوضع «on»).
+  ورق A3 = تصميم A4 مكبّراً (`page.scale_from`). ملف الأصول نصوص قالب فقط — لا تضع فيه محتوى جداول.
+  الخط Times New Roman غير موجود على Linux: عرض النصوص يُتحقق منه على Windows.
 - **المساعد الذكي (1.8):** أدوات `propose_*` لا تكتب أبداً (اختبار يعدّ الأسطر)؛ الكتابة فقط في `actions.apply` بعد زر «تطبيق».
   المحرك الداخلي لا يدعم مناداة الأدوات الرسمية → صيغة نصية `TOOL: name {...}` (`native_tools=False`).
   llama-cpp-python يُبنى في CI بـ `CMAKE_ARGS` (AVX2 عام، بلا OpenMP)؛ لا تضف `GGML_NATIVE`.
@@ -107,4 +115,4 @@ Python 3.12 + **PySide6 6.8** + SQLite (sqlite3 مباشرة، بلا ORM) + OR-
 
 ## التاريخ
 
-الإصدارات وتفاصيلها في `README.md` و`docs/releases/`. آخر إصدار: **1.8.0** (15/11/2026) — المساعد الذكي الداخلي (llama.cpp) واقتراحات التعديل بالموافقة.
+الإصدارات وتفاصيلها في `README.md` و`docs/releases/`. آخر إصدار: **1.9.0** (16/11/2026) — محرر نصوص الورقة، القوالب الافتراضية للأقسام، ثيم «ورقي دافئ»، أزرار الرموز.

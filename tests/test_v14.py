@@ -119,7 +119,8 @@ def test_print_layout_inheritance(seeded):
     assert used3 == [f"level:{lvl}", f"section:{sec}"] and lay3["boxes"] == [] and lay3["page"]["paper"] == "A3"
     other = ids["sections"][1]
     lay_o, _ = L.effective(db, "section", lvl, other)
-    assert lay_o["boxes"] and lay_o["page"]["margins"] == [20.0, 20.0, 20.0, 20.0]
+    # الهوامش الموروثة = هوامش القالب العام للمؤسسة منذ 1.9 (لا هوامش القسم الأول)
+    assert lay_o["boxes"] and lay_o["page"]["margins"] == lay["page"]["margins"] != [5, 5, 5, 5]
     L.reset(db, f"section:{sec}")
     assert L.effective(db, "section", lvl, sec)[1] == [f"level:{lvl}"]
     # الحقول التلقائية: المعروف الفارغ يُعلَّم، وغير المعروف يبقى كما هو

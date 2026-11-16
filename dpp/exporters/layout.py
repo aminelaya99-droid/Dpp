@@ -24,7 +24,8 @@ PAPER_LABELS = {"A4": "A4", "A3": "A3", "A5": "A5", "Letter": "Letter (رسال�
 # الحقول التي تُملأ تلقائياً داخل النصوص الحرة
 PLACEHOLDERS = {
     "institution": "اسم المؤسسة", "target": "اسم القسم / الأستاذ / القاعة", "section": "القسم",
-    "level": "الطور", "specialty": "الاختصاص", "week": "رقم الأسبوع", "week_words": "الأسبوع بالحروف",
+    "level": "الطور", "level_line": "سطر الطور (كما في الورقة الرسمية)", "spec_line": "سطر الاختصاص",
+    "specialty": "الاختصاص", "week": "رقم الأسبوع", "week_words": "الأسبوع بالحروف",
     "d0": "بداية الأسبوع", "d1": "نهاية الأسبوع", "year": "السنة الدراسية", "formation": "التكوين",
     "today": "تاريخ الطباعة", "page": "رقم الصفحة", "pages": "عدد الصفحات", "decree": "رقم المقرر",
     "hours": "الحجم الساعي (للأستاذ)",
@@ -38,6 +39,10 @@ DEFAULT_LAYOUT = {
     "hidden_fields": [],    # نصوص القالب الأصلية المخفية (مثل «republic»)
     "field_styles": {},     # تنسيق نصوص القالب نفسها: {مفتاح النص أو صنفه: {font, size, bold, …, dx, dy, w, h}}
     "cell_styles": {},      # تنسيق خانة بعينها لهذا الأسبوع فقط (لا يُحفظ في القالب؛ انظر save_cell_styles)
+    "base_styles": {},      # «الأصل» الذي يضعه القالب الافتراضي للمؤسسة لنصوص الترويسة (section_defaults)
+    "font": "",             # خط الورقة في القالب الافتراضي (فارغ = خط الإعدادات)
+    "approval_box": None,   # [x, y, العرض, الارتفاع] لإطار المصادقة (None = الموضع المعتاد)
+    "builtin": [],          # طبقات القالب الافتراضي التي ساهمت (للعرض فقط)
     "table": {
         "border_w": 0.6, "outer_w": 1.2, "border_color": "#000000",
         "head_fill": "", "day_fill": "", "cell_fill": "",
@@ -51,6 +56,10 @@ DEFAULT_LAYOUT = {
         "merges": [],           # [{"day", "c0", "c1", "text"}] خلايا مدمجة بنص للطباعة فقط
         "cell_texts": {},       # {"day:col": نص} نص للطباعة فقط داخل خانة فارغة
         "top": 172.0, "bottom_gap": 80.0,
+        "label_pt": 6.0,        # حجم أسماء الحصص في رأس الجدول
+        "head_pad": 0.0,        # إنزال نص رأس الجدول داخل خانته
+        "fit_text": False,      # تصغير نص الخانة تلقائياً إذا لم يسعه حيّزه (كما في aSc)
+        "compact": False,       # ورقة بلا ترويسة: الجدول يبدأ من «top» مباشرة
     },
 }
 
@@ -275,11 +284,27 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def _with_builtin(db: Database, lay: dict, kind: str, level_id, section_id, store: dict) -> tuple[dict, list]:
+    """يضع تحت قوالب المستخدم القالبَ الافتراضي للمؤسسة (العام ← الطور ← القسم) لأوراق الأقسام."""
+    if kind != "section":
+        return lay, []
+    from . import section_defaults as SD
+    # «معدّل» = قالب حفظه المستخدم قبل القوالب الافتراضية (بلا علامة on_builtin). ما يُحفظ فوق القالب
+    # الافتراضي يبقى فوقه: حفظ تعديل صغير لا يُسقط شكل الورقة الرسمي.
+    customised = any(sc in store and not store[sc].get("on_builtin")
+                     for sc in scope_chain(kind, level_id, section_id))
+    names = []
+    for name, layer in SD.layout_layers(db, level_id, section_id, customised):
+        lay = _merge(lay, layer)
+        names.append(name)
+    lay["builtin"] = names           # للعرض فقط («القالب الافتراضي: عام/طور/قسم»)؛ لا يُحفظ
+    return lay, []
+
+
 def effective(db: Database, kind: str, level_id: int | None = None, section_id: int | None = None) -> tuple[dict, list]:
     """(التخطيط الفعلي، النطاقات التي ساهمت فيه من العام إلى الخاص)."""
     st = _store(db)
-    lay = base_layout(kind)
-    used = []
+    lay, used = _with_builtin(db, base_layout(kind), kind, level_id, section_id, st)
     for sc in scope_chain(kind, level_id, section_id):
         if sc in st:
             lay = _merge(lay, st[sc])
@@ -306,7 +331,7 @@ def diff(base: dict, full: dict) -> dict:
             gone = [i for i in bb if i not in {b["id"] for b in v}]
             if gone:
                 out["removed_boxes"] = gone
-        elif k in ("removed_boxes", "cell_styles"):
+        elif k in ("removed_boxes", "cell_styles", "builtin", "on_builtin"):
             continue
         elif k == "field_styles":
             d = _diff_styles(base.get(k) or {}, v or {})
@@ -326,12 +351,14 @@ def save(db: Database, scope: str, full_layout: dict, kind: str, level_id=None, 
     chain = scope_chain(kind, level_id, section_id)
     upto = chain[:chain.index(scope)] if scope in chain else chain[:-1]
     st = _store(db)
-    base = base_layout(kind)
+    base, _b = _with_builtin(db, base_layout(kind), kind, level_id, section_id, st)
     for sc in upto:
         if sc in st:
             base = _merge(base, st[sc])
     d = diff(base, full_layout)
     d["version"] = VERSION
+    if base.get("builtin"):
+        d["on_builtin"] = True          # الفرق محسوب فوق القالب الافتراضي للمؤسسة
     st[scope] = d
     db.set_setting(_KEY, json.dumps(st, ensure_ascii=False))
     db.log("حفظ قالب الطباعة", "templates", None, {"scope": scope})
@@ -377,8 +404,10 @@ def fill_text(text: str, values: dict) -> tuple[str, list[str]]:
 
 def paper_size(layout: dict) -> tuple[float, float]:
     """(العرض، الارتفاع) بالنقطة حسب الورق والاتجاه."""
-    w, h = PAPERS.get(layout["page"].get("paper", "A4"), PAPERS["A4"])
-    return (h, w) if layout["page"].get("orientation", "landscape") == "landscape" else (w, h)
+    pg = layout["page"]
+    # scale_from: التصميم على ورق (A4 مثلاً) والطباعة على ورق أكبر بنفس النِّسب (A3 = A4 مكبّرة)
+    w, h = PAPERS.get(pg.get("scale_from") or pg.get("paper", "A4"), PAPERS["A4"])
+    return (h, w) if pg.get("orientation", "landscape") == "landscape" else (w, h)
 
 
 def effective_default() -> dict:

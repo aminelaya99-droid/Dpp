@@ -138,6 +138,14 @@ class DesignPanel(QTabWidget):
         self.dlg.apply_layout_change(fn, rebuild)
 
     # ------------------------------------------------------------------ الورقة
+    def _set_paper(self, l: dict):
+        paper = self.paper.currentData()
+        l["page"]["paper"] = paper
+        if self.scale_chk.isChecked() and paper in ("A3", "A5"):     # نفس النِّسب: A3/A4/A5
+            l["page"]["scale_from"] = "A4"
+        else:
+            l["page"].pop("scale_from", None)
+
     def _page_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
@@ -146,8 +154,13 @@ class DesignPanel(QTabWidget):
         self.paper = QComboBox()
         for k, lab in L.PAPER_LABELS.items():
             self.paper.addItem(lab, k)
-        self.paper.currentIndexChanged.connect(lambda _: self.change(lambda l: l["page"].update(paper=self.paper.currentData())))
+        self.paper.currentIndexChanged.connect(lambda _: self.change(self._set_paper))
         f.addRow("المقاس", self.paper)
+        self.scale_chk = QCheckBox("نفس تصميم A4 مكبّراً أو مصغّراً على هذا الورق")
+        self.scale_chk.setToolTip("كما في أوراق aSc: ورقة A3 هي ورقة A4 مكبّرة بكل ما فيها.\n"
+                                  "بلا هذا الخيار يكبر الجدول وتبقى أحجام النصوص كما هي.")
+        self.scale_chk.toggled.connect(lambda _on: self.change(self._set_paper))
+        f.addRow("", self.scale_chk)
         self.orient = QComboBox()
         self.orient.addItem("أفقي", "landscape")
         self.orient.addItem("عمودي", "portrait")
@@ -780,6 +793,10 @@ class DesignPanel(QTabWidget):
         self.inherit = QLabel()
         self.inherit.setWordWrap(True)
         v.addWidget(self.inherit)
+        self.b_defaults = QPushButton(icon("mdi6.file-table-box-multiple-outline"), "القوالب الافتراضية للأقسام…")
+        self.b_defaults.setToolTip("أي قالب من قوالب المؤسسة يأخذه كل قسم، مع تصحيح المطابقة يدوياً")
+        self.b_defaults.clicked.connect(self.open_section_defaults)
+        v.addWidget(self.b_defaults)
         g = QGroupBox("حفظ التصميم الحالي في قالب")
         f = QVBoxLayout(g)
         self.scope_btns = QButtonGroup(self)
@@ -806,6 +823,15 @@ class DesignPanel(QTabWidget):
         v.addWidget(g2)
         v.addStretch()
         return w
+
+    def open_section_defaults(self):
+        from .section_tpl_ui import open_dialog
+        sh = self.dlg.cur_sheet()
+        fid = self.dlg.db.scalar("SELECT formation_id FROM sections WHERE id=?", (sh.section_id,)) \
+            if sh.section_id else None
+        if open_dialog(self.dlg.db, fid, self):
+            self.dlg.reload_layouts(keep_current=False)
+            info(self, "حُدّث تصميم الأوراق. نصوص القالب (القاعة، سطر الطور، المقرر) تتحدّث عند فتح المعاينة من جديد.")
 
     def save_scope(self):
         b = self.scope_btns.checkedButton()
@@ -840,6 +866,8 @@ class DesignPanel(QTabWidget):
         sc = self.dlg.cur_scene()
         self._loading = True
         self.paper.setCurrentIndex(max(0, self.paper.findData(lay["page"].get("paper", "A4"))))
+        self.scale_chk.setChecked(bool(lay["page"].get("scale_from")))
+        self.scale_chk.setEnabled(lay["page"].get("paper", "A4") in ("A3", "A5"))
         self.orient.setCurrentIndex(max(0, self.orient.findData(lay["page"].get("orientation", "landscape"))))
         for s, x in zip(self.margins, lay["page"].get("margins", [20, 20, 20, 20])):
             s.setValue(float(x))
@@ -906,6 +934,10 @@ class DesignPanel(QTabWidget):
             self.scope_btns.addButton(rb)
             self.scope_box.addWidget(rb)
         src = [L.scope_label(self.dlg.db, s) for s in sh.layout_scopes]
+        bi = {"builtin:general": "القالب العام للمؤسسة", "builtin:level": "قالب الطور", "builtin:section": "قالب القسم",
+              "builtin:simple": "قالب الاحتياط (عنوان + جدول)"}
+        src = [bi.get(n, n) for n in (sh.layout.get("builtin") or [])] + src
+        self.b_defaults.setVisible(sh.kind == "section")
         self.inherit.setText("<b>مصدر تصميم هذه الورقة:</b> " + (" ← ".join(src) if src else "التصميم الافتراضي")
                              + ("<br><span style='color:#B45309'>فيها تعديلات غير محفوظة.</span>"
                                 if self.dlg.is_dirty() else ""))

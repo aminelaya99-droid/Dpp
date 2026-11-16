@@ -64,9 +64,10 @@ COMMON = {
 }
 DEFAULT_FIELDS = {
     "section": COMMON | {
-        "left_block": "السنة الدراسية : {year}\n{level}\nالقاعة : {room}",
+        # level_line و spec_line: سطرا الطور كما في أوراق المؤسسة (قالب القسم الافتراضي)، وإلا اسم الطور
+        "left_block": "السنة الدراسية : {year}\n{level_line}\nالقاعة : {room}",
         "center_block": "الأسبوع : {week_words}\nالمقرر رقم : {decree} المؤرخ في {decree_date}\n"
-                        "البرنامج الأسبوعي الدراسي لـ : {target}\nإختصاص : {level}\n"
+                        "البرنامج الأسبوعي الدراسي لـ : {target}\nإختصاص : {spec_line}\n"
                         "خلال الفترة الممتدة من : {d0} إلى غاية : {d1}",
     },
     "teacher": COMMON | {
@@ -334,10 +335,13 @@ def _finish(db, kind, target_id, ws, level_id, values, periods, cells, name) -> 
     sec_id = target_id if kind == "section" else None
     lay, used = L.effective(db, kind, level_id, sec_id)
     lay["cell_styles"] = L.cell_styles(db, kind, target_id, ws)      # تنسيق خانات هذا الأسبوع فقط
+    style = template_style(db)
+    if lay.get("font") and "font" not in load_store(db).get("style", {}):
+        style = style | {"font": lay["font"]}                        # خط القالب الافتراضي ما لم يختر المستخدم خطاً
     return Sheet(kind=kind, target_id=target_id, ws=ws, scope=scope_of(kind, level_id), level_id=level_id,
                  raw=raw, values=values, fields={k: fill(v, values) for k, v in raw.items()},
                  days=list(DAY_NAMES), periods=[(p[0], f"{hm(p[1])} - {hm(p[2])}") for p in periods],
-                 cells=cells, style=template_style(db), name=name, section_id=sec_id, layout=lay,
+                 cells=cells, style=style, name=name, section_id=sec_id, layout=lay,
                  layout_scopes=used)
 
 
@@ -370,6 +374,9 @@ def build_section_sheet(db: Database, section_id: int, ws) -> Sheet:
         "level": sec["lfull"] or sec["lname"] or "", "room": "",
         "decree": sec["decree"] or "", "decree_date": sec["decree_date"] or "",
         "specialty": sec["spname"] or "", "formation": sec["fname"] or ""}
+    values["level_line"] = values["spec_line"] = values["level"]
+    from . import section_defaults as SD
+    values.update(SD.values(db, section_id, values))                 # نصوص قالب القسم الافتراضي إن وُجد
     return _finish(db, "section", section_id, ws, sec["level_id"], values, periods,
                    _place(rows, periods, days, cell_of), sec["short"] or sec["name"])
 

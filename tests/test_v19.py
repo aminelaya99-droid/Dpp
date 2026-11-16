@@ -294,3 +294,201 @@ def test_paper_theme_is_an_extra_option(seeded):
         assert ratio(pal["side_text"], pal["side_bg"]) >= 4.5
     w.apply_style("command")
     w.close()
+
+
+# ------------------------------------------------------------------ القوالب الافتراضية للأقسام
+KITCHEN1 = "الطلبة ضباط الصف المتعاقدين سنة ثانية (مطبخ وإطعام وإيواء:فصيلة أولى)"
+BMP2_FIN = "ضباط الصف المتربصين العاملين (أ م ع د 2 :تكوين مكونين-ميزانية ومالية)"
+
+
+def _as(db, sec, name, code):
+    """يجعل القسم التجريبي باسم ورمز طور حقيقيين (كما يأتيان من aSc)."""
+    lvl = db.scalar("SELECT level_id FROM sections WHERE id=?", (sec,))
+    db.execute("UPDATE sections SET name=? WHERE id=?", (name, sec))
+    db.execute("UPDATE levels SET code=? WHERE id=?", (code, lvl))
+    db.commit()
+    return lvl
+
+
+def test_section_defaults_asset_is_template_only():
+    from dpp.exporters import section_defaults as SD
+    data = SD.load()
+    assert len(data["sections"]) == 39 and set(data["levels"]) == {"ESOC2", "ESOC1", "BMP2", "BMP1", "RESERVE"}
+    assert sum(1 for e in data["sections"] if e.get("simple")) == 4
+    assert all(e["level"] for e in data["sections"]) and len({e["key"] for e in data["sections"]}) == 39
+    allowed = {"key", "name", "level", "paper", "room", "decree", "decree_date", "level_line", "spec_line", "note",
+               "simple", "flags"}
+    assert all(set(e) <= allowed for e in data["sections"])              # نصوص قالب فقط: لا أساتذة ولا حصص
+    assert data["levels"]["ESOC2"]["spec_line"] == "شهادة مهنية عسكرية درجة ثانية - سنة ثانية"
+    assert data["levels"]["BMP2"]["paper"] == "A3" and data["levels"]["ESOC1"]["room"] == "الفضاء البيداغوجي"
+    assert sum(1 for e in data["sections"] if e.get("flags")) == 5        # الاختلافات معلَّمة للمراجعة
+    assert not any("شهادة هنية" in e.get("spec_line", "") for e in data["sections"])        # الخطأ المطبعي مصحَّح
+
+
+def test_section_defaults_matching(seeded):
+    db, ids = seeded
+    from dpp.exporters import section_defaults as SD
+    a, b, c = ids["sections"][:3]
+    _as(db, a, KITCHEN1, "ESOC2")
+    m = SD.match(db, a)
+    assert (m.how, m.entry["key"], m.level, m.source) == ("exact", "مطبخ ف1", "ESOC2", "section")
+    # اختلاف في الكتابة (فراغات، شرطة بدل النقطتين، ه بدل ة) لا يمنع المطابقة
+    db.execute("UPDATE sections SET name=? WHERE id=?",
+               ("الطلبة ضباط الصف المتعاقدين  سنة ثانية (مطبخ وإطعام وإيواء - فصيلة ثانيه)", b))
+    assert SD.match(db, b).entry["key"] == "مطبخ ف2"
+    # قسم جديد من طور معروف ← قالب الطور؛ طور غير معروف ← القالب العام
+    db.execute("UPDATE sections SET name=?, short=? WHERE id=?", ("قسم جديد (اختصاص جديد)", "جديد", c))
+    m = SD.match(db, c)
+    assert (m.entry, m.how, m.source, m.level) == (None, "none", "level", "ESOC2")
+    assert SD.values(db, c, {})["spec_line"] == "شهادة مهنية عسكرية درجة ثانية - سنة ثانية"
+    lvl = db.scalar("SELECT level_id FROM sections WHERE id=?", (c,))
+    db.execute("UPDATE levels SET code='XYZ' WHERE id=?", (lvl,))
+    db.execute("UPDATE sections SET name='قسم آخر', short='آخر' WHERE id=?", (c,))
+    m = SD.match(db, c)
+    assert m.source == "general" and SD.values(db, c, {}) == {}
+    assert [n for n, _l in SD.layout_layers(db, lvl, c, False)] == ["builtin:general"]
+    # التصحيح اليدوي والرجوع عنه
+    SD.set_choice(db, c, "س01")
+    m = SD.match(db, c)
+    assert (m.how, m.entry["key"], m.level) == ("manual", "س01", "ESOC1")
+    SD.set_choice(db, c, "")
+    assert SD.match(db, c).entry is None and SD.match(db, c).how == "manual"
+    SD.set_choice(db, c, None)
+    assert SD.match(db, c).how == "none"
+    # التعطيل الكلي
+    SD.set_enabled(db, False)
+    assert SD.layout_layers(db, lvl, a, False) == [] and SD.values(db, a, {}) == {}
+    SD.set_enabled(db, True)
+
+
+def test_section_default_template_on_sheet(seeded, tmp_path):
+    db, ids = seeded
+    _week(db, ids)
+    _app()
+    from dpp.exporters import section_defaults as SD
+    from dpp.ui.sheet_view import SheetScene, render_to_pdf
+    sec = ids["sections"][0]
+    lvl = _as(db, sec, KITCHEN1, "ESOC2")
+    sh = O.build(db, "section", sec, START)
+    assert sh.layout["builtin"] == ["builtin:general", "builtin:section"] and sh.layout_scopes == []
+    assert sh.fields["left_block"].split("\n")[1:] == ["شهادة مهنية عسكرية درجة ثانية", "القاعة : 10"]
+    assert "إختصاص : شهادة مهنية عسكرية درجة ثانية - سنة ثانية" in sh.fields["center_block"]
+    assert "المقرر رقم : 25/111/و د و/أج و ش/ب1 المؤرخ في 2025/07/23" in sh.fields["center_block"]
+    assert f"لـ : {KITCHEN1}" in sh.fields["center_block"]
+    assert sh.style["font"] == "Times New Roman" and "note" in sh.layout["hidden_fields"]
+    assert sh.layout["table"]["top"] == 180.5 and sh.layout["page"]["paper"] == "A4"
+    sc = SheetScene(sh, design=True)
+    by = {t.key: t for t in sc.texts}
+    assert "note" not in by and abs(by["center_block"].box.width() - 436.0) < 0.01
+    # «الأصل» في المحرر هو القالب الافتراضي: الإزاحة تُحسب منه والإرجاع يعود إليه
+    assert sc.field_base["center_block"]["size"] == 10.7 and sc.field_base["right_block"]["align"] == "right"
+    base_x = by["right_block"].box.x()
+    L.set_field_style(sh.layout, "right_block", dx=-10.0)
+    assert abs({t.key: t for t in SheetScene(sh).texts}["right_block"].box.x() - (base_x - 10)) < 0.01
+    L.clear_field_style(sh.layout, "right_block")
+    # مقرر الاختصاص المحدَّد في البرنامج يتقدّم على مقرر القالب
+    db.execute("UPDATE specialties SET decree='99/001', decree_date='2026/01/01' WHERE id="
+               "(SELECT specialty_id FROM sections WHERE id=?)", (sec,))
+    if db.scalar("SELECT specialty_id FROM sections WHERE id=?", (sec,)):
+        assert "المقرر رقم : 99/001" in O.build(db, "section", sec, START).fields["center_block"]
+    # BMP2: ورق A3 بنفس تصميم A4 مكبّراً، مع الملاحظة
+    _as(db, sec, BMP2_FIN, "BMP2")
+    sh3 = O.build(db, "section", sec, START)
+    assert sh3.layout["page"]["paper"] == "A3" and L.paper_size(sh3.layout) == (841.89, 595.28)
+    assert "note" not in sh3.layout["hidden_fields"] and "القاعة : 03" in sh3.fields["left_block"]
+    out = tmp_path / "a3.pdf"
+    render_to_pdf([SheetScene(sh3)], str(out))
+    from PySide6.QtGui import QPageSize
+    assert SheetScene(sh3).page_layout().pageSize().id() == QPageSize.A3 and out.stat().st_size > 2000
+    # الاحتياط: عنوان كبير + جدول يملأ الصفحة
+    _as(db, sec, "طلبة ضباط الصف (خدمة وطنية)", "ESO-R")
+    sh4 = O.build(db, "section", sec, START)
+    assert sh4.layout["builtin"] == ["builtin:simple"] and sh4.layout["table"]["compact"]
+    sc4 = SheetScene(sh4)
+    assert "republic" not in {t.key for t in sc4.texts} and len(sc4.boxes) == 1
+    assert SD.GENERAL["table"]["top"] == 180.5                     # القالب العام لم يتغيّر بالدمج
+
+
+def test_user_template_stays_on_top_of_default(seeded):
+    """قالب محفوظ قبل 1.9 يبقى كما هو (لا يُفرض عليه القالب الافتراضي)، وما يُحفظ بعده يبقى فوق الافتراضي."""
+    import json
+    db, ids = seeded
+    from dpp.exporters import section_defaults as SD
+    a, b = ids["sections"][:2]
+    lvl = _as(db, a, KITCHEN1, "ESOC2")
+    # (1) قالب طور قديم بلا علامة: القسم «معدّل» ← القالب الافتراضي لا يُطبَّق على تصميمه
+    key = L._KEY
+    db.set_setting(key, json.dumps({f"level:{lvl}": {"version": 2, "table": {"top": 200.0}}}))
+    lay, used = L.effective(db, "section", lvl, a)
+    assert lay["builtin"] == [] and lay["table"]["top"] == 200.0 and used == [f"level:{lvl}"]
+    row = next(r for r in SD.overview(db) if r["id"] == a)
+    assert row["custom"] and not row["applied"]
+    # … إلا إذا طلب المستخدم وضعه تحت تصميمه
+    SD.set_choice(db, a, None, "on")
+    lay, _u = L.effective(db, "section", lvl, a)
+    assert lay["builtin"] and lay["table"]["top"] == 200.0 and lay["table"]["day_w"] == 67.0
+    SD.set_choice(db, a, None, None)
+    # (2) بلا قوالب قديمة: حفظ تعديل صغير لا يُسقط شكل الورقة الرسمي
+    db.set_setting(key, "{}")
+    lay, _u = L.effective(db, "section", lvl, a)
+    lay["table"]["day_w"] = 80.0
+    L.save(db, f"section:{a}", lay, "section", lvl, a)
+    stored = L.scope_layout(db, f"section:{a}")
+    assert stored["on_builtin"] is True and stored["table"] == {"day_w": 80.0} and "base_styles" not in stored
+    lay2, used = L.effective(db, "section", lvl, a)
+    assert lay2["builtin"] == ["builtin:general", "builtin:section"] and used == [f"section:{a}"]
+    assert lay2["table"]["day_w"] == 80.0 and lay2["table"]["top"] == 180.5
+    assert next(r for r in SD.overview(db) if r["id"] == a)["applied"]
+
+
+def test_section_templates_review_dialog(seeded):
+    db, ids = seeded
+    _app()
+    from dpp.exporters import section_defaults as SD
+    from dpp.ui.section_tpl_ui import AUTO, SectionTemplatesDialog
+    a, b, c = ids["sections"][:3]
+    _as(db, a, KITCHEN1, "ESOC2")
+    db.execute("UPDATE sections SET name=? WHERE id=?", ("الطلبة ضباط الصف المتعاقدين سنة ثانية (خياط)", b))
+    db.execute("UPDATE sections SET name='قسم بلا قالب', short='جديد' WHERE id=?", (c,))
+    db.commit()
+    dlg = SectionTemplatesDialog(db, ids["formation"])
+    assert dlg.table.rowCount() == len(ids["sections"])
+    rows = {r["id"]: i for i, r in enumerate(dlg.rows)}
+    assert "مطبخ ف1" in dlg.table.item(rows[a], 3).text() and dlg.table.item(rows[a], 5).text() == "10"
+    assert "قالب الطور" in dlg.table.item(rows[c], 3).text()
+    assert "شهادة هنية" in dlg.flag_lbl.text()                       # الملاحظات على الأوراق الأصلية ظاهرة
+    cb = dlg.table.cellWidget(rows[c], 2)
+    assert cb.currentData() == AUTO
+    cb.setCurrentIndex(cb.findData("مطبخ ف3"))                       # تصحيح يدوي
+    assert dlg.changed and SD.match(db, c).entry["key"] == "مطبخ ف3"
+    assert "اختيارك" in dlg.table.item({r["id"]: i for i, r in enumerate(dlg.rows)}[c], 3).text()
+    dlg._all_auto()
+    assert SD.match(db, c).how == "none"
+    dlg.chk_on.setChecked(False)
+    assert not SD.enabled(db) and not dlg.table.isEnabled()
+    dlg.chk_on.setChecked(True)
+    dlg.close()
+
+
+def test_paper_scaling_option_in_design_panel(seeded, monkeypatch):
+    db, ids = seeded
+    _week(db, ids)
+    _app()
+    from dpp.ui import sheet_view as SV
+    sec = ids["sections"][0]
+    _as(db, sec, BMP2_FIN, "BMP2")
+    dlg = SV.PreviewDialog(db, [O.build(db, "section", sec, START)])
+    dlg.b_design.setChecked(True)
+    d = dlg.design
+    d.sync()
+    assert d.paper.currentData() == "A3" and d.scale_chk.isChecked() and d.scale_chk.isEnabled()
+    d.scale_chk.setChecked(False)                     # A3 حقيقي: الورقة تكبر والنصوص بحجمها
+    sh = dlg.cur_sheet()
+    assert "scale_from" not in sh.layout["page"] and L.paper_size(sh.layout) == (1190.55, 841.89)
+    d.scale_chk.setChecked(True)
+    assert sh.layout["page"]["scale_from"] == "A4" and L.paper_size(sh.layout) == (841.89, 595.28)
+    d.paper.setCurrentIndex(d.paper.findData("Letter"))     # ورق بنِسب أخرى: لا تكبير
+    assert "scale_from" not in sh.layout["page"] and sh.layout["page"]["paper"] == "Letter"
+    monkeypatch.setattr(dlg, "_unsaved_design", lambda: True)      # لا نافذة «تعديلات غير محفوظة» في الاختبار
+    dlg.b_save.setEnabled(False)
+    dlg.close()

@@ -84,6 +84,18 @@ class EditText(QGraphicsTextItem):
             bf.setLineHeight(line_h * 100, 1)     # ProportionalHeight
             cur.mergeBlockFormat(bf)
 
+    def shrink_to_fit(self, min_pt: float = 6.0):
+        """يصغّر الخط نصف نقطة في كل مرة حتى يسع النصَّ حيّزُه (للخانات المزدحمة، كما يفعل aSc)."""
+        size, bold, italic, underline, line_h = self._fmt
+        while size > min_pt and self.document().size().height() > self.box.height() + 0.5:
+            size = max(min_pt, size - 0.5)
+            f = self.font()
+            f.setPointSizeF(size * _pt_factor())
+            self.setFont(f)
+            self._fmt = (size, bold, italic, underline, line_h)
+            self._format_all()
+        self._relayout()
+
     def _relayout(self):
         h = self.document().size().height()
         if self.valign == Qt.AlignTop:
@@ -278,15 +290,22 @@ class FreeBox(QGraphicsRectItem):
             self.sc.box_geometry.emit(self.box["id"], new)
 
 
-_ALIGN_Q = {"right": Qt.AlignRight, "center": Qt.AlignHCenter, "left": Qt.AlignLeft, "justify": Qt.AlignJustify}
+# المحاذاة التي يختارها المستخدم مطلقة: «يمين» يبقى يميناً في النص العربي (RTL يقلب AlignLeft/AlignRight غير المطلقين)
+_ALIGN_Q = {"right": Qt.AlignRight | Qt.AlignAbsolute, "center": Qt.AlignHCenter,
+            "left": Qt.AlignLeft | Qt.AlignAbsolute, "justify": Qt.AlignJustify}
 _VALIGN_Q = {"top": Qt.AlignTop, "middle": Qt.AlignVCenter, "bottom": Qt.AlignBottom}
 
 
 def _align_name(a) -> str:
-    for n, q in _ALIGN_Q.items():
-        if a == q:
-            return n
-    return "center"
+    """اسم المحاذاة كما تُرى على الورقة."""
+    if a & Qt.AlignHCenter:
+        return "center"
+    if a & Qt.AlignJustify:
+        return "justify"
+    right = bool(a & Qt.AlignRight)
+    if not (a & Qt.AlignAbsolute):
+        right = not right                 # في نص RTL: AlignRight غير المطلق يُرسم يساراً والعكس
+    return "right" if right else "left"
 
 
 def _valign_name(a) -> str:
@@ -520,13 +539,24 @@ class SheetScene(QGraphicsScene):
 
     # ------------------------------------------------------------------ أدوات
     def _t(self, key, rect, size, bold=True, italic=False, underline=False, align=Qt.AlignHCenter,
-           valign=Qt.AlignVCenter, default=None, line_h=0.0):
+           valign=Qt.AlignVCenter, default=None, line_h=0.0, fit=False):
         if key in self.sheet.layout.get("hidden_fields", []):
             return None
         text = self.sheet.edits.get(key, self.sheet.fields.get(key, "") if default is None else default)
         orig = self.sheet.fields.get(key, "") if default is None else default
         stylable = L.is_stylable(key)
-        base, family, color = QRectF(rect), None, None
+        family, color = None, None
+        bs = (self.sheet.layout.get("base_styles") or {}).get(key) if stylable else None
+        if bs:                                   # «الأصل» كما يضعه القالب الافتراضي للمؤسسة
+            size = float(bs.get("size") or size)
+            bold, italic = bool(bs.get("bold", bold)), bool(bs.get("italic", italic))
+            underline = bool(bs.get("underline", underline))
+            align = _ALIGN_Q.get(bs.get("align"), align)
+            valign = _VALIGN_Q.get(bs.get("valign"), valign)
+            line_h = float(bs.get("line_h") or line_h or 0.0)
+            rect = QRectF(rect.x() + float(bs.get("dx") or 0), rect.y() + float(bs.get("dy") or 0),
+                          float(bs.get("w") or rect.width()), float(bs.get("h") or rect.height()))
+        base = QRectF(rect)
         if stylable:
             self.field_base[key] = {"size": float(size), "bold": bool(bold), "italic": bool(italic),
                                     "underline": bool(underline), "align": _align_name(align),
@@ -549,6 +579,8 @@ class SheetScene(QGraphicsScene):
         it = EditText(self, key, text, rect, size, bold, italic, underline, align, valign, line_h,
                       family=family, color=color)
         it.original = orig
+        if fit:
+            it.shrink_to_fit()
         self.addItem(it)
         self.texts.append(it)
         if stylable:
@@ -627,10 +659,11 @@ class SheetScene(QGraphicsScene):
         self._t("left_block", QRectF(ml + 10, mt + 10, side_w, 52), hp, align=Qt.AlignRight, valign=Qt.AlignTop,
                 line_h=1.15)
         if "approval" not in lay.get("hidden_fields", []):
-            box = QRectF(ml, mt + 64, min(185.0, side_w), 76)
+            ab = lay.get("approval_box")
+            box = QRectF(*[float(x) for x in ab]) if ab else QRectF(ml, mt + 64, min(185.0, side_w), 76)
             self._rect(box, 0.9, radius=8)
-            self._t("approval", QRectF(box.left() + 4, box.top() + 2, box.width() - 8, 32), hp + 0.5, underline=True,
-                    valign=Qt.AlignTop)
+            self._t("approval", QRectF(box.left() + 4, box.top() + 2, box.width() - 8, 44 if ab else 32),
+                    hp + 0.5, underline=True, valign=Qt.AlignTop)
         cw = max(160.0, W - 2 * (side_w + 25 + max(ml, mr)))
         self._t("center_block", QRectF(cx - cw / 2, mt + 30, cw, 120), cp, align=Qt.AlignHCenter,
                 valign=Qt.AlignTop, line_h=1.45)
@@ -638,6 +671,10 @@ class SheetScene(QGraphicsScene):
         # ---- الجدول
         top = max(mt + 140, float(tb.get("top") or 172.0) * (H / PAGE_H if H < PAGE_H else 1.0))
         bottom = H - max(mb + 40, float(tb.get("bottom_gap") or 80.0))
+        if tb.get("compact"):                    # ورقة بلا ترويسة (عنوان + جدول): الجدول يملأ الصفحة
+            top = float(tb.get("top") or 172.0)
+            bottom = H - max(mb, float(tb.get("bottom_gap") or 80.0))
+        fit = bool(tb.get("fit_text"))
         day_w = float(tb.get("day_w") or 64.0)
         left, right = ml, W - mr
         head_h = float(tb.get("head_h") or 30.0)
@@ -683,8 +720,12 @@ class SheetScene(QGraphicsScene):
             x0, x1 = xs[j]
             lab, tm = sh.periods[j]
             self._rect(QRectF(x0, top, x1 - x0, head_h), bw, head_fill, color=bcol)
-            self._t(f"ph:{j}:label", QRectF(x0, top + 2, x1 - x0, 11), 6, bold=False, default=lab)
-            self._t(f"ph:{j}:time", QRectF(x0, top + 12, x1 - x0, 16), head_pt, default=tm)
+            lab_h = max(11.0, head_h * 0.36)
+            pad = float(tb.get("head_pad") or 0.0)           # إنزال اسم الحصة وتوقيتها داخل رأس الجدول
+            self._t(f"ph:{j}:label", QRectF(x0, top + 2 + pad, x1 - x0, lab_h), float(tb.get("label_pt") or 6.0),
+                    bold=False, default=lab)
+            self._t(f"ph:{j}:time", QRectF(x0, top + lab_h + 1 + pad * 0.87, x1 - x0,
+                                           head_h - lab_h - 2 - pad * 0.87), head_pt, default=tm)
         if notes_r:
             self._rect(QRectF(notes_r[0], top, notes_r[1] - notes_r[0], head_h), bw, head_fill, color=bcol)
             self._t("notes_title", QRectF(notes_r[0], top, notes_r[1] - notes_r[0], head_h), head_pt,
@@ -730,17 +771,18 @@ class SheetScene(QGraphicsScene):
             self._rect(QRectF(x0, y0, x1 - x0, row_h), bw, fill, color=bcol)
             key = f"cell:{c.day}:{c.c0}"
             has_sub = bool(c.sub) or bool(c.corner and self.show_room)
-            title_r = QRectF(x0 + 3, y0 + 2, x1 - x0 - 6, row_h - (15 if has_sub else 4))
+            sub_h = max(13.0, sub_pt * 1.5)          # سطر الأستاذ/القاعة أسفل الخانة (يكبر مع حجم خطه)
+            title_r = QRectF(x0 + 3, y0 + 2, x1 - x0 - 6, row_h - (sub_h + 2 if has_sub else 4))
             self._t(key + ":title", title_r, title_pt, st["title_bold"], st["title_italic"],
-                    st["title_underline"], default=c.title,
+                    st["title_underline"], default=c.title, fit=fit,
                     align=Qt.AlignJustify if tb.get("cell_align") == "justify" else Qt.AlignHCenter)
             sub_w = (x1 - x0) * (0.72 if (c.corner and self.show_room) else 0.96)
             if c.sub:
-                self._t(key + ":sub", QRectF(x1 - sub_w - 2, y0 + row_h - 14, sub_w, 13), sub_pt, False,
-                        align=Qt.AlignRight, valign=Qt.AlignBottom, default=c.sub)
+                self._t(key + ":sub", QRectF(x1 - sub_w - 2, y0 + row_h - sub_h - 1, sub_w, sub_h), sub_pt, False,
+                        align=Qt.AlignRight, valign=Qt.AlignBottom, default=c.sub, fit=fit)
             if c.corner and self.show_room:
-                self._t(key + ":corner", QRectF(x0 + 2, y0 + row_h - 14, (x1 - x0) * 0.26, 13), sub_pt, True,
-                        align=Qt.AlignLeft, valign=Qt.AlignBottom, default=c.corner)
+                self._t(key + ":corner", QRectF(x0 + 2, y0 + row_h - sub_h - 1, (x1 - x0) * 0.26, sub_h), sub_pt,
+                        True, align=Qt.AlignLeft, valign=Qt.AlignBottom, default=c.corner, fit=fit)
             if c.note:
                 self._t(key + ":note", QRectF(x0 + 2, y0 + 1, (x1 - x0) * 0.5, 10), 5.5, False,
                         align=Qt.AlignLeft, valign=Qt.AlignTop, default=c.note)
@@ -1724,6 +1766,10 @@ class PrintDialog(QDialog):
         self.count_lbl.setObjectName("Muted")
         form.addRow("", self.count_lbl)
         bb = QDialogButtonBox()
+        self.b_tpl = bb.addButton("قوالب الأقسام…", QDialogButtonBox.HelpRole)
+        self.b_tpl.setIcon(icon("mdi6.file-table-box-multiple-outline"))
+        self.b_tpl.setToolTip("القوالب الافتراضية للمؤسسة: أي قالب يأخذه كل قسم")
+        self.b_tpl.clicked.connect(self._section_templates)
         self.b_prev = bb.addButton("معاينة", QDialogButtonBox.AcceptRole)
         self.b_pdf = bb.addButton("PDF مباشرة", QDialogButtonBox.ActionRole)
         self.b_print = bb.addButton("طباعة مباشرة", QDialogButtonBox.ActionRole)
@@ -1781,6 +1827,10 @@ class PrintDialog(QDialog):
         from ..services.grid import week_of_number
         a, b = self.w_from.currentData(), self.w_to.currentData()
         return [week_of_number(self.db, n) for n in range(a, max(a, b) + 1)]
+
+    def _section_templates(self):
+        from .section_tpl_ui import open_dialog
+        open_dialog(self.db, self.ctx.formation_id, self)
 
     def jobs(self) -> list[tuple[str, int, object]]:
         k, t = self.kind.currentData(), self.target.currentData()
