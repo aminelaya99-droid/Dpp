@@ -702,7 +702,7 @@ class MainWindow(QMainWindow):
             self.ctx.db.set_setting("ui_style", style)
         self.app.setProperty("ui_style", style)
         office, focus, daily = style == "office", style == "focus", style == "daily"
-        sidebar = style in ("teal", "clean", "ops", "ledger", "command")
+        sidebar = style in ("teal", "clean", "ops", "ledger", "command", "paper")
         self.ribbon.setVisible(office)
         self.focus_bar.setVisible(focus)
         self.top_nav.setVisible(daily)
@@ -712,10 +712,10 @@ class MainWindow(QMainWindow):
         # الواجهة أ: قائمة أيقونات ضيقة دائماً
         if style == "ops":
             self.modern_side.set_collapsed(True, emit=False)
-        elif style in ("ledger", "teal", "clean", "command"):
+        elif style in ("ledger", "teal", "clean", "command", "paper"):
             self.modern_side.set_collapsed(self.ctx.db.get_setting("side_collapsed", "0") == "1", emit=False)
         self.modern_side.collapse_btn.setVisible(style != "ops")
-        self.header.set_rich(style == "command")
+        self.header.set_rich(style in theme.COMMAND_SHELL)
         # نقل البحث واختيار التكوين وأزرار المظهر إلى شريط النمط الحالي
         target = (self.header.slot if sidebar else self.top_nav.slot if daily
                   else (self.focus_bar.slot if focus else self.ribbon.top_l))
@@ -736,7 +736,7 @@ class MainWindow(QMainWindow):
         self.apply_style(keys[(keys.index(cur) + 1) % len(keys)])
 
     def toggle_side(self):
-        if self.ui_style in ("teal", "clean", "ledger", "ops", "command"):
+        if self.ui_style in ("teal", "clean", "ledger", "ops", "command", "paper"):
             self.modern_side.set_collapsed(not self.modern_side.collapsed)
         elif self.ui_style == "office":
             self.side.setVisible(not self.side.isVisible())

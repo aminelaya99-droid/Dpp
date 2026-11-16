@@ -31,7 +31,7 @@ def test_old_styles_still_available(seeded):
     db, _ids = seeded
     w = MainWindow(AppContext(db), app)
     w.show()
-    assert [k for k, _ in STYLES] == ["command", "ops", "ledger", "daily"]
+    assert [k for k, _ in STYLES] == ["command", "ops", "ledger", "daily", "paper"]
     for key, _lab in ALL_STYLES:
         w.apply_style(key)
         app.processEvents()

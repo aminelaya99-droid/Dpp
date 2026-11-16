@@ -234,3 +234,63 @@ def test_preview_text_editor_flow(seeded, monkeypatch):
     assert nxt.layout["field_styles"] == again.layout["field_styles"] and nxt.layout["cell_styles"] == {}
     dlg.b_save.setEnabled(False)
     dlg.close()
+
+
+# ------------------------------------------------------------------ الجدول العام: أزرار برموز فقط
+def test_master_toolbar_icon_only_buttons(seeded):
+    db, ids = seeded
+    _week(db, ids)
+    _app()
+    from PySide6.QtCore import Qt
+    from dpp.ui.context import AppContext
+    from dpp.ui.pages.master import MasterPage
+    ctx = AppContext(db)
+    ctx.set_formation(ids["formation"])
+    page = MasterPage(ctx)
+    five = {"تراجع": page.b_undo, "إعادة": page.b_redo, "خيارات العرض": page.b_display,
+            "طباعة": page.b_print, "تصدير الأسبوع": page.b_export}
+    for name, b in five.items():
+        assert b.toolButtonStyle() == Qt.ToolButtonIconOnly and not b.icon().isNull()
+        assert b.accessibleName() == name and name.split()[0] in b.toolTip()      # الاسم باقٍ في التلميح
+    assert page.b_undo.menu() is not None and page.b_redo.menu() is not None       # سهم آخر 20 عملية باقٍ
+    assert page.gen_btn.text() == "برمجة آلية"                                     # الأزرار الأخرى بنصها
+
+
+# ------------------------------------------------------------------ ثيم «ورقي دافئ»
+def test_paper_theme_is_an_extra_option(seeded):
+    app = _app()
+    db, _ids = seeded
+    from PySide6.QtGui import QColor
+    from dpp.ui import theme
+    from dpp.ui.context import AppContext
+    from dpp.ui.main_window import MainWindow
+    from dpp.ui.shell import DEFAULT_STYLE, STYLES
+    assert DEFAULT_STYLE == "command" and ("paper" in dict(STYLES))          # خيار إضافي، لا يغيّر الافتراضي
+    w = MainWindow(AppContext(db), app)
+    w.show()
+    assert w.ui_style == "command"
+    w.apply_style("paper")
+    app.processEvents()
+    assert db.get_setting("ui_style") == "paper" and theme.CURRENT_NAME == "paper"
+    assert theme.CURRENT["bg"] == "#F5F1E8" and theme.CURRENT["accent"] == "#4D5F2A"
+    # نفس هيكل الواجهة الحديثة: قائمة جانبية + مسار التنقل والمستخدم في الشريط العلوي
+    assert w.modern_side.isVisible() and w.header.rich and w.header.user_btn.isVisible()
+    assert "QFrame#Card { border-radius: 14px; }" in theme._style_extra(theme.CURRENT).replace("{{", "{")
+    w.apply_theme("dark")
+    assert theme.CURRENT_NAME == "paper_dark" and theme.is_dark()
+    w.apply_theme("light")
+    assert theme.CURRENT_NAME == "paper"
+
+    def ratio(a, b):                                   # تباين WCAG
+        def lum(c):
+            ch = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+                  for x in (QColor(c).redF(), QColor(c).greenF(), QColor(c).blueF())]
+            return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+        hi, lo = sorted((lum(a), lum(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+    for pal in (theme.PAPER, theme.PAPER_DARK):
+        assert ratio(pal["text"], pal["bg"]) >= 7 and ratio(pal["text"], pal["surface"]) >= 7
+        assert ratio(pal["muted"], pal["surface"]) >= 4.5 and ratio(pal["accent_text"], pal["accent"]) >= 4.5
+        assert ratio(pal["side_text"], pal["side_bg"]) >= 4.5
+    w.apply_style("command")
+    w.close()

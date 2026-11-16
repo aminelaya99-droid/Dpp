@@ -353,7 +353,7 @@ def test_three_styles(seeded):
     from dpp.ui.shell import STYLES
     db.set_setting("ui_style", "clean")            # 1.7: أي نمط قديم ← الواجهة الافتراضية الجديدة
     w = MainWindow(AppContext(db), app)
-    assert w.ui_style == "command" and [k for k, _ in STYLES] == ["command", "ops", "ledger", "daily"]
+    assert w.ui_style == "command" and [k for k, _ in STYLES] == ["command", "ops", "ledger", "daily", "paper"]
     w.show()
     w.navigate("master")
     for st, pal in (("command", "command"), ("ops", "ops"), ("ledger", "ledger"), ("daily", "daily")):

@@ -96,7 +96,7 @@ COMMAND = {
     "sel": "#DCFCE7", "grid": "#E8EDF3", "header": "#F8FAFC",
     "side_bg": "#0D1526", "side_text": "#C3CEDE", "side_muted": "#76859B", "side_active": "rgba(34,197,94,0.22)",
     "side_active_text": "#FFFFFF", "side_hover": "rgba(255,255,255,0.07)", "side_border": "#0A101D",
-    "radius": "12px",
+    "radius": "12px", "shell": "command",
 }
 COMMAND_DARK = {
     "bg": "#0B1220", "surface": "#121B2C", "surface2": "#162033", "border": "#24324A", "text": "#E8EEF7",
@@ -106,18 +106,44 @@ COMMAND_DARK = {
     "sel": "#14361F", "grid": "#1E2A3F", "header": "#101828",
     "side_bg": "#070D18", "side_text": "#AFC0D6", "side_muted": "#7C8DA6", "side_active": "rgba(34,197,94,0.20)",
     "side_active_text": "#FFFFFF", "side_hover": "rgba(255,255,255,0.06)", "side_border": "#05090F",
-    "radius": "12px",
+    "radius": "12px", "shell": "command",
+}
+
+# هـ) ورقي دافئ (الإصدار 1.9): نفس هيكل «DPP الحديثة» بخلفية بلون الورق وأخضر زيتوني داكن —
+# مريح للعين في العمل الطويل، وقريب من شكل الورقة المطبوعة.
+PAPER = {
+    "bg": "#F5F1E8", "surface": "#FFFDF8", "surface2": "#FAF6EC", "border": "#DDD5C3", "text": "#2A2620",
+    "muted": "#5F574A", "accent": "#4D5F2A", "accent_hover": "#3E4D21", "accent_text": "#FFFFFF",
+    "cta": "#4D5F2A", "cta_hover": "#3E4D21", "focus": "#4D5F2A",
+    "ribbon": "#2F3A1F", "ribbon_panel": "#FFFDF8", "ok": "#3F6B1F", "warn": "#9A5B0A", "bad": "#A8321F",
+    "sel": "#E3E9CF", "grid": "#E8E1D0", "header": "#F3EEE1",
+    "side_bg": "#2F3A1F", "side_text": "#DDE3CC", "side_muted": "#A3AD8C", "side_active": "#55682E",
+    "side_active_text": "#FFFFFF", "side_hover": "rgba(255,255,255,0.08)", "side_border": "#263018",
+    "radius": "12px", "shell": "command",
+}
+PAPER_DARK = {
+    "bg": "#1B1915", "surface": "#24211B", "surface2": "#2A271F", "border": "#3E392C", "text": "#EDE7D8",
+    "muted": "#A9A08C", "accent": "#A9BD72", "accent_hover": "#BDCF8A", "accent_text": "#1A1F0C",
+    "cta": "#A9BD72", "cta_hover": "#BDCF8A", "focus": "#BDCF8A",
+    "ribbon": "#14130F", "ribbon_panel": "#24211B", "ok": "#A9BD72", "warn": "#E0B259", "bad": "#EB8A78",
+    "sel": "#353B21", "grid": "#332F25", "header": "#211E18",
+    "side_bg": "#14130F", "side_text": "#CFC8B5", "side_muted": "#8F8773", "side_active": "#3A4422",
+    "side_active_text": "#FFFFFF", "side_hover": "rgba(255,255,255,0.06)", "side_border": "#0E0D0A",
+    "radius": "12px", "shell": "command",
 }
 
 PALETTES = {"office": OFFICE, "clean": LIGHT, "light": LIGHT, "dark": DARK, "teal": DARK, "graphite": GRAPHITE,
-            "ops": OPS, "ledger": LEDGER, "daily": DAILY, "command": COMMAND, "command_dark": COMMAND_DARK}
+            "ops": OPS, "ledger": LEDGER, "daily": DAILY, "command": COMMAND, "command_dark": COMMAND_DARK,
+            "paper": PAPER, "paper_dark": PAPER_DARK}
 # اللوحة الافتراضية لكل نمط واجهة (عند اختيار «حسب النمط»)
 STYLE_THEME = {"office": "office", "teal": "dark", "clean": "clean", "focus": "graphite",
-               "ops": "ops", "ledger": "ledger", "daily": "daily", "command": "command"}
-NEW_STYLES = ("ops", "ledger", "daily", "command")
+               "ops": "ops", "ledger": "ledger", "daily": "daily", "command": "command", "paper": "paper"}
+NEW_STYLES = ("ops", "ledger", "daily", "command", "paper")
+# الأنماط التي تستعمل هيكل «DPP الحديثة» (قائمة جانبية مجمّعة + شريط علوي بمسار تنقل)
+COMMAND_SHELL = ("command", "paper")
 # لكل نمط حديث: (لوحته الفاتحة، لوحته الداكنة) — يستعملها «تلقائي» و«فاتح/داكن»
 STYLE_PAIR = {"ops": ("ledger", "ops"), "ledger": ("ledger", "ops"), "daily": ("daily", "ops"),
-              "command": ("command", "command_dark")}
+              "command": ("command", "command_dark"), "paper": ("paper", "paper_dark")}
 THEME_MODES = [("style", "حسب نمط الواجهة"), ("auto", "تلقائي حسب Windows"), ("light", "فاتح"),
                ("dark", "داكن (أخضر بترولي)"), ("graphite", "رمادي داكن")]
 FONTS = [("Almarai", "Almarai"), ("Tajawal", "Tajawal"), ("Cairo", "Cairo")]
@@ -467,7 +493,7 @@ def _style_extra(t: dict) -> str:
     QPushButton#NavItem[collapsed="1"] {{ padding: 10px 4px; border-radius: 10px; }}
     QPushButton#Primary, QPushButton#Cta {{ color: {t['accent_text']}; }}
     """
-    if t.get("side_bg") in (COMMAND["side_bg"], COMMAND_DARK["side_bg"]) and t.get("radius") == "12px":
+    if t.get("shell") == "command":
         out += f"""
     QFrame#Card {{ border-radius: 14px; }}
     QFrame#Card:hover {{ border-color: {t['border']}; }}

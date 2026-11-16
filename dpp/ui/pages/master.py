@@ -1804,14 +1804,16 @@ class MasterPage(QWidget):
             h.addWidget(f)
             h.addSpacing(4)
 
-        def tb(ic, tip, fn, text=None):
+        def tb(ic, tip, fn, text=None, icon_only=False):
             b = QToolButton()
             b.setIcon(icon(ic))
             b.setToolTip(tip)
             b.setCursor(Qt.PointingHandCursor)
             if text:
                 b.setText(text)
-                b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+                b.setAccessibleName(text)
+                # رمز فقط لتوفير مساحة الشريط: الاسم يبقى في التلميح وفي اسم الزر
+                b.setToolButtonStyle(Qt.ToolButtonIconOnly if icon_only else Qt.ToolButtonTextBesideIcon)
             b.clicked.connect(fn)
             h.addWidget(b)
             self._tb_icons.append((b, ic))
@@ -1863,15 +1865,14 @@ class MasterPage(QWidget):
         self.b_conf = tb("mdi6.alert-outline", "قائمة التعارضات النشطة", self.show_conflicts, "التعارضات")
         self.b_conf.setObjectName("ConfBadge")
         sep()
-        # التراجع والإعادة: الزر يكتب اسم العملية، والسهم يفتح آخر 20 عملية (اختيار عملية يتراجع حتى هي)
-        self.b_undo = tb("mdi6.undo", "تراجع (Ctrl+Z)", self.undo, "تراجع")
-        self.b_redo = tb("mdi6.redo", "إعادة (Ctrl+Y)", self.redo, "إعادة")
+        # التراجع والإعادة: رمز فقط؛ اسم العملية في التلميح، والسهم يفتح آخر 20 عملية (اختيار عملية يتراجع حتى هي)
+        self.b_undo = tb("mdi6.undo", "تراجع (Ctrl+Z)", self.undo, "تراجع", icon_only=True)
+        self.b_redo = tb("mdi6.redo", "إعادة (Ctrl+Y)", self.redo, "إعادة", icon_only=True)
         for b, which in ((self.b_undo, "undo"), (self.b_redo, "redo")):
             mn = QMenu(b)
             mn.aboutToShow.connect(lambda mn=mn, which=which: self._fill_history(mn, which))
             b.setMenu(mn)
             b.setPopupMode(QToolButton.MenuButtonPopup)
-            b.setMaximumWidth(260)
         tb("mdi6.backup-restore", "الرجوع إلى الأصل المستورد لهذا الأسبوع", self.revert_imported)
         sep()
         self.size_btns = {}
@@ -1888,10 +1889,12 @@ class MasterPage(QWidget):
             b.setAutoRepeat(True)
             b.clicked.connect(lambda _=False, st=st: self.zoom(st))
             h.addWidget(b)
-        tb("mdi6.tune-variant", "خيارات العرض", self.display_options, "خيارات العرض")
-        tb("mdi6.printer-eye", "طباعة البرنامج بالقالب الرسمي مع المعاينة (Ctrl+P)", self.print_program, "طباعة")
-        tb("mdi6.folder-zip-outline", "تصدير الأسبوع كاملاً للحفظ: مجلد فيه Word وPDF لكل قسم وملف يجمع الأقسام",
-           self.export_week, "تصدير الأسبوع")
+        self.b_display = tb("mdi6.tune-variant", "خيارات العرض", self.display_options, "خيارات العرض", icon_only=True)
+        self.b_print = tb("mdi6.printer-eye", "طباعة البرنامج بالقالب الرسمي مع المعاينة (Ctrl+P)",
+                          self.print_program, "طباعة", icon_only=True)
+        self.b_export = tb("mdi6.folder-zip-outline",
+                           "تصدير الأسبوع كاملاً للحفظ: مجلد فيه Word وPDF لكل قسم وملف يجمع الأقسام",
+                           self.export_week, "تصدير الأسبوع", icon_only=True)
         sep()
         self.gen_btn = QPushButton(icon("mdi6.auto-fix", "white"), "برمجة آلية")
         self.gen_btn.setObjectName("Cta")
@@ -2834,9 +2837,9 @@ class MasterPage(QWidget):
         for b, which, base, key in ((self.b_undo, "undo", "تراجع", "Ctrl+Z"), (self.b_redo, "redo", "إعادة", "Ctrl+Y")):
             ops = self.grid.history(which, 1)
             txt = f"{base}: {ops[0]}" if ops else base
-            fm = b.fontMetrics()
-            b.setText(fm.elidedText(txt, Qt.ElideRight, 200))
-            b.setToolTip(f"{txt} ({key})" if ops else f"لا يوجد ما {'يُتراجع عنه' if which == 'undo' else 'يُعاد'}")
+            b.setText(txt)                      # غير ظاهر (رمز فقط)؛ يبقى اسماً للزر
+            b.setToolTip(f"{txt} ({key})" if ops else
+                         f"{base} ({key}) — لا يوجد ما {'يُتراجع عنه' if which == 'undo' else 'يُعاد'}")
             b.setEnabled(True)
 
     def revert_imported(self):
