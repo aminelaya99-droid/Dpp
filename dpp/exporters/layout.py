@@ -36,6 +36,8 @@ DEFAULT_LAYOUT = {
     "boxes": [],            # مربعات النص الحرة (انظر new_box)
     "removed_boxes": [],    # مربعات موروثة حُذفت في هذا النطاق
     "hidden_fields": [],    # نصوص القالب الأصلية المخفية (مثل «republic»)
+    "field_styles": {},     # تنسيق نصوص القالب نفسها: {مفتاح النص أو صنفه: {font, size, bold, …, dx, dy, w, h}}
+    "cell_styles": {},      # تنسيق خانة بعينها لهذا الأسبوع فقط (لا يُحفظ في القالب؛ انظر save_cell_styles)
     "table": {
         "border_w": 0.6, "outer_w": 1.2, "border_color": "#000000",
         "head_fill": "", "day_fill": "", "cell_fill": "",
@@ -62,6 +64,128 @@ def new_box(x: float, y: float, text: str = "نص جديد", w: float = 200.0, h
             "valign": "middle", "font": "", "size": 11.0, "bold": False, "italic": False, "underline": False,
             "color": "#000000", "frame_w": 0.0, "frame_color": "#000000", "padding": 3.0, "rotation": 0.0,
             "fill": "", "kashida": False, "justify_last": False}
+
+
+# ------------------------------------------------------------------ تنسيق نصوص القالب (1.9)
+# نصوص الورقة المبنية (الترويسة، العنوان، التوقيعات…) كانت مكتوبة الشكل والموضع في الكود.
+# الآن لكل نص مفرد تنسيقه وموضعه، ونصوص الجدول تُنسَّق كصنف (اسم المادة في كل الخانات)،
+# مع إمكانية تنسيق خانة بعينها لأسبوع واحد.
+FIELD_LABELS = {
+    "republic": "عنوان الجمهورية", "right_block": "الترويسة اليمنى", "left_block": "الترويسة اليسرى",
+    "approval": "خانة المصادقة", "center_block": "العنوان الأوسط", "note": "الملاحظة",
+    "created": "تاريخ الإنشاء", "sign_right": "التوقيع الأيمن", "sign_center": "التوقيع الأوسط",
+    "sign_left": "التوقيع الأيسر", "notes_title": "عنوان عمود الملاحظات", "rpt_title": "عنوان التقرير",
+    "pageno": "رقم الصفحة",
+}
+CLASS_LABELS = {
+    "cls:title": "اسم المادة", "cls:sub": "الأستاذ", "cls:corner": "القاعة في الخانة",
+    "cls:cnote": "ملاحظة الخانة", "cls:day": "أسماء الأيام", "cls:ph_time": "توقيت الحصص",
+    "cls:ph_label": "أسماء الحصص", "cls:merge": "نص الخلايا المدمجة", "cls:ctext": "نص الخانات الفارغة",
+}
+STYLE_PROPS = ("font", "size", "bold", "italic", "underline", "color", "align", "valign", "line_h")
+GEO_PROPS = ("dx", "dy", "w", "h")          # الإزاحة وحيّز النص: للنصوص المفردة فقط
+_CELL_SUFFIX = {"title": "cls:title", "sub": "cls:sub", "corner": "cls:corner", "note": "cls:cnote"}
+
+
+def field_class(key: str) -> str | None:
+    """صنف نص الجدول الذي ينتمي إليه المفتاح، أو None للنص المفرد."""
+    if key.startswith("ph:"):
+        return "cls:ph_label" if key.endswith(":label") else "cls:ph_time"
+    if key.startswith("day:"):
+        return "cls:day"
+    if key.startswith("cell:"):
+        return _CELL_SUFFIX.get(key.rsplit(":", 1)[-1])
+    if key.startswith("merge:"):
+        return "cls:merge"
+    if key.startswith("ctext:"):
+        return "cls:ctext"
+    return None
+
+
+def is_stylable(key: str) -> bool:
+    return key in FIELD_LABELS or field_class(key) is not None
+
+
+def field_label(key: str) -> str:
+    cls = field_class(key)
+    return CLASS_LABELS.get(cls, "") if cls else FIELD_LABELS.get(key, key)
+
+
+def field_style(layout: dict, key: str) -> dict:
+    """التنسيق الفعلي لنص: صنفه، ثم النص نفسه (القالب)، ثم الخانة بعينها (هذا الأسبوع)."""
+    fs = layout.get("field_styles") or {}
+    out: dict = {}
+    cls = field_class(key)
+    if cls:
+        out.update(fs.get(cls) or {})
+        out.update((layout.get("cell_styles") or {}).get(key) or {})
+    else:
+        out.update(fs.get(key) or {})
+    return {a: b for a, b in out.items() if b is not None}
+
+
+def style_target(key: str, cell_only: bool = False) -> tuple[str, str]:
+    """(اسم المخزن، المفتاح) الذي يُكتب فيه تنسيق هذا النص."""
+    cls = field_class(key)
+    if cls and cell_only:
+        return "cell_styles", key
+    return "field_styles", (cls or key)
+
+
+def set_field_style(layout: dict, key: str, cell_only: bool = False, **kv) -> None:
+    """يضبط خصائص تنسيق نص. القيمة None تحذف الخاصية فترجع موروثة."""
+    store, k = style_target(key, cell_only)
+    if field_class(key):                      # نصوص الجدول: شكل فقط، بلا إزاحة ولا حيّز
+        kv = {a: b for a, b in kv.items() if a in STYLE_PROPS}
+    d = layout.setdefault(store, {}).setdefault(k, {})
+    for a, b in kv.items():
+        if b is None:
+            d.pop(a, None)
+        else:
+            d[a] = b
+    if not d:
+        layout[store].pop(k, None)
+
+
+def clear_field_style(layout: dict, key: str, cell_only: bool = False) -> None:
+    """إرجاع النص إلى الأصل (أو إلى الموروث من النطاق الأعم)."""
+    store, k = style_target(key, cell_only)
+    (layout.get(store) or {}).pop(k, None)
+
+
+_CELL_KEY = "official_cell_styles"
+
+
+def _sheet_key(kind: str, target_id, ws) -> str:
+    return f"{kind}:{target_id}|{ws.isoformat() if hasattr(ws, 'isoformat') else ws}"
+
+
+def cell_styles(db: Database, kind: str, target_id, ws) -> dict:
+    """تنسيق الخانات المحفوظ لورقة أسبوع بعينه."""
+    try:
+        st = json.loads(db.get_setting(_CELL_KEY, "") or "{}")
+    except ValueError:
+        st = {}
+    v = st.get(_sheet_key(kind, target_id, ws)) if isinstance(st, dict) else None
+    return copy.deepcopy(v) if isinstance(v, dict) else {}
+
+
+def save_cell_styles(db: Database, kind: str, target_id, ws, styles: dict) -> None:
+    try:
+        st = json.loads(db.get_setting(_CELL_KEY, "") or "{}")
+    except ValueError:
+        st = {}
+    if not isinstance(st, dict):
+        st = {}
+    k = _sheet_key(kind, target_id, ws)
+    styles = {a: b for a, b in (styles or {}).items() if b}
+    if styles == (st.get(k) or {}):
+        return
+    if styles:
+        st[k] = styles
+    else:
+        st.pop(k, None)
+    db.set_setting(_CELL_KEY, json.dumps(st, ensure_ascii=False))
 
 
 def _store(db: Database) -> dict:
@@ -111,6 +235,29 @@ def scope_label(db: Database, scope: str) -> str:
     return scope
 
 
+def _live_styles(fs: dict | None) -> dict:
+    """تنسيقات النصوص بلا علامات الإلغاء (None = «أرجِع هذه الخاصية إلى الأصل» في نطاق أخص)."""
+    out = {}
+    for k, d in (fs or {}).items():
+        d = {a: b for a, b in (d or {}).items() if b is not None}
+        if d:
+            out[k] = d
+    return out
+
+
+def _diff_styles(base: dict, full: dict) -> dict:
+    """فرق تنسيقات النصوص؛ ما أُرجع إلى الأصل في النطاق الأخص يُحفظ None حتى لا يعود موروثاً."""
+    out = {}
+    for k in list(dict.fromkeys(list(base) + list(full))):
+        b = {a: v for a, v in (base.get(k) or {}).items() if v is not None}
+        f = full.get(k) or {}
+        d = {a: copy.deepcopy(v) for a, v in f.items() if b.get(a) != v}
+        d.update({a: None for a in b if a not in f})
+        if d:
+            out[k] = d
+    return out
+
+
 def _merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in (over or {}).items():
@@ -139,6 +286,7 @@ def effective(db: Database, kind: str, level_id: int | None = None, section_id: 
             used.append(sc)
     removed = set(lay.get("removed_boxes", []))
     lay["boxes"] = [b for b in lay.get("boxes", []) if b["id"] not in removed]
+    lay["field_styles"] = _live_styles(lay.get("field_styles"))
     return lay, used
 
 
@@ -158,8 +306,12 @@ def diff(base: dict, full: dict) -> dict:
             gone = [i for i in bb if i not in {b["id"] for b in v}]
             if gone:
                 out["removed_boxes"] = gone
-        elif k == "removed_boxes":
+        elif k in ("removed_boxes", "cell_styles"):
             continue
+        elif k == "field_styles":
+            d = _diff_styles(base.get(k) or {}, v or {})
+            if d:
+                out[k] = d
         elif isinstance(v, dict) and isinstance(base.get(k), dict):
             d = diff(base[k], v)
             if d:

@@ -46,20 +46,21 @@ class EditText(QGraphicsTextItem):
     """نص في صندوق ثابت: محاذاة أفقية وعمودية، قابل للتعديل في وضع التعديل."""
 
     def __init__(self, scene: "SheetScene", key: str, text: str, rect: QRectF, size: float, bold=False,
-                 italic=False, underline=False, align=Qt.AlignHCenter, valign=Qt.AlignVCenter, line_h=0.0):
+                 italic=False, underline=False, align=Qt.AlignHCenter, valign=Qt.AlignVCenter, line_h=0.0,
+                 family: str | None = None, color: str | None = None):
         super().__init__()
         self.sc, self.key, self.box = scene, key, QRectF(rect)
         self.align, self.valign = align, valign
         self._fmt = (size, bold, italic, underline, line_h)
         self.original = text
         f = QFont()
-        f.setFamilies([scene.sheet.style.get("font") or "Arial", "Arial", "Almarai", "DejaVu Sans"])
+        f.setFamilies([family or scene.sheet.style.get("font") or "Arial", "Arial", "Almarai", "DejaVu Sans"])
         f.setPointSizeF(size * _pt_factor())
         f.setBold(bold)
         f.setItalic(italic)
         f.setUnderline(underline)
         self.setFont(f)
-        self.setDefaultTextColor(QColor("#000000"))
+        self.setDefaultTextColor(QColor(color or "#000000"))
         opt = QTextOption(align | Qt.AlignVCenter)
         opt.setTextDirection(Qt.RightToLeft)
         opt.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
@@ -277,6 +278,155 @@ class FreeBox(QGraphicsRectItem):
             self.sc.box_geometry.emit(self.box["id"], new)
 
 
+_ALIGN_Q = {"right": Qt.AlignRight, "center": Qt.AlignHCenter, "left": Qt.AlignLeft, "justify": Qt.AlignJustify}
+_VALIGN_Q = {"top": Qt.AlignTop, "middle": Qt.AlignVCenter, "bottom": Qt.AlignBottom}
+
+
+def _align_name(a) -> str:
+    for n, q in _ALIGN_Q.items():
+        if a == q:
+            return n
+    return "center"
+
+
+def _valign_name(a) -> str:
+    for n, q in _VALIGN_Q.items():
+        if a == q:
+            return n
+    return "middle"
+
+
+class FieldFrame(QGraphicsRectItem):
+    """إطار تحديد لنص من نصوص القالب في وضع التصميم.
+
+    نقر = تحديد (فتظهر خصائصه في تبويب «النص»). النص المفرد يُسحب للإزاحة ويُغيَّر حيّزه بالمقبض
+    وبالأسهم؛ نصوص الجدول صنف واحد (شكل فقط) فلا تُحرَّك. لا يُرسم شيء منه عند الطباعة."""
+
+    HANDLE = 7.0
+
+    def __init__(self, scene: "SheetScene", key: str, rect: QRectF, base: QRectF, movable: bool):
+        super().__init__(0, 0, rect.width(), rect.height())
+        self.sc, self.key, self.base, self.movable = scene, key, QRectF(base), movable
+        self.cls = L.field_class(key)
+        self.setPos(rect.topLeft())
+        self.setZValue(4)
+        self.setPen(Qt.NoPen)
+        self.setBrush(Qt.NoBrush)
+        self._resizing = False
+        self._hover = False
+        self.setAcceptHoverEvents(True)
+        self.setToolTip(L.field_label(key) + (" — صنف: يتغيّر في كل الخانات" if self.cls else " — اسحبه لإزاحته"))
+        self.setVisible(False)
+
+    def set_design(self, on: bool):
+        self.setVisible(on)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, on)
+        self.setFlag(QGraphicsItem.ItemIsFocusable, on)
+        self.setFlag(QGraphicsItem.ItemIsMovable, on and self.movable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, on)
+        self.setCursor(Qt.SizeAllCursor if (on and self.movable) else Qt.PointingHandCursor)
+
+    def paint(self, p, option, widget=None):
+        if not self.sc.design or self.sc.printing:
+            return
+        sel = self.isSelected()
+        same = bool(self.cls) and self.sc.sel_class == self.cls and not sel
+        if not (sel or same or self._hover):
+            return
+        col = QColor("#2563EB") if self.cls else QColor("#15803D")
+        r = self.rect()
+        p.setPen(QPen(col, 0.9 if sel else 0.6, Qt.SolidLine if sel else Qt.DashLine))
+        p.setBrush(QColor(col.red(), col.green(), col.blue(), 22) if sel else Qt.NoBrush)
+        p.drawRect(r)
+        if sel and self.movable:
+            p.setBrush(col)
+            p.drawRect(QRectF(r.right() - self.HANDLE, r.bottom() - self.HANDLE, self.HANDLE, self.HANDLE))
+
+    def _on_handle(self, pos) -> bool:
+        r = self.rect()
+        return (self.movable and self.isSelected() and pos.x() >= r.right() - self.HANDLE - 2
+                and pos.y() >= r.bottom() - self.HANDLE - 2)
+
+    def hoverEnterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().hoverEnterEvent(e)
+
+    def hoverLeaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().hoverLeaveEvent(e)
+
+    def hoverMoveEvent(self, e):
+        if self.sc.design and self.movable:
+            self.setCursor(Qt.SizeFDiagCursor if self._on_handle(e.pos()) else Qt.SizeAllCursor)
+        super().hoverMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        if self.sc.design and self._on_handle(e.pos()):
+            self._resizing = True
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._resizing:
+            g = self.sc.grid_size if self.sc.snap else 1.0
+            w = max(20.0, round(e.pos().x() / g) * g)
+            h = max(8.0, round(e.pos().y() / g) * g)
+            self.prepareGeometryChange()
+            self.setRect(0, 0, w, h)
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        super().mouseReleaseEvent(e)
+        self._resizing = False
+        self._commit_geometry()
+
+    def mouseDoubleClickEvent(self, e):
+        if self.sc.design:
+            self.sc.request_edit_field.emit(self.key)
+            return
+        super().mouseDoubleClickEvent(e)
+
+    def keyPressEvent(self, e):
+        if not (self.sc.design and self.movable):
+            return super().keyPressEvent(e)
+        step = 10.0 if e.modifiers() & Qt.ShiftModifier else 1.0
+        d = {Qt.Key_Left: (-step, 0), Qt.Key_Right: (step, 0), Qt.Key_Up: (0, -step), Qt.Key_Down: (0, step)}.get(e.key())
+        if d:
+            self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, False)     # الأسهم: نقطة بنقطة بلا التصاق
+            self.setPos(self.pos().x() + d[0], self.pos().y() + d[1])
+            self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+            self._commit_geometry()
+            return
+        super().keyPressEvent(e)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self.movable and self.sc.snap and not self._resizing:
+            g = self.sc.grid_size
+            return QPointF(round(value.x() / g) * g, round(value.y() / g) * g)
+        if change == QGraphicsItem.ItemSelectedHasChanged:
+            self.sc.sel_class = self.cls if value else None
+            self.sc.selection_field.emit(self.key if value else "")
+            self.sc.update()
+        return super().itemChange(change, value)
+
+    def _commit_geometry(self):
+        if not self.movable:
+            return
+        r = self.rect()
+        geo = {"dx": round(self.pos().x() - self.base.x(), 1), "dy": round(self.pos().y() - self.base.y(), 1)}
+        if abs(r.width() - self.base.width()) > 0.05 or "w" in L.field_style(self.sc.sheet.layout, self.key):
+            geo["w"] = round(r.width(), 1)
+        if abs(r.height() - self.base.height()) > 0.05 or "h" in L.field_style(self.sc.sheet.layout, self.key):
+            geo["h"] = round(r.height(), 1)
+        cur = L.field_style(self.sc.sheet.layout, self.key)
+        if any(abs(float(cur.get(k, 0.0 if k in ("dx", "dy") else v)) - v) > 0.05 for k, v in geo.items()):
+            self.sc.field_geometry.emit(self.key, geo)
+
+
 class TableHandle(QGraphicsRectItem):
     """مقبض لتغيير عرض عمود أو ارتفاع سطر الجدول بالسحب (وضع التصميم فقط)."""
 
@@ -317,6 +467,9 @@ class SheetScene(QGraphicsScene):
     request_edit_text = Signal(str)
     request_delete = Signal(str)
     table_resize = Signal(str, int, int, float)
+    selection_field = Signal(str)            # مفتاح نص القالب المحدد ("" = لا شيء)
+    field_geometry = Signal(str, object)     # (المفتاح، {dx, dy, w, h})
+    request_edit_field = Signal(str)
 
     def __init__(self, sheet: O.Sheet, show_room=True, color=False, edit_mode=False, design=False,
                  page_no: int = 1, pages: int = 1):
@@ -331,6 +484,10 @@ class SheetScene(QGraphicsScene):
         self.snap, self.grid_size, self.show_grid = True, 10.0, True
         self.texts: list[EditText] = []
         self.boxes: dict[str, FreeBox] = {}
+        self.frames: dict[str, FieldFrame] = {}      # إطارات تحديد نصوص القالب (وضع التصميم)
+        self.field_base: dict[str, dict] = {}        # الشكل الأصلي لكل نص قبل أي تنسيق
+        self.overflow: list[str] = []                # نصوص لا يتّسع لها حيّزها
+        self.sel_class: str | None = None
         self.hidden_with_data: list[str] = []
         self.setBackgroundBrush(QBrush(QColor("#ffffff")))
         self._build()
@@ -345,8 +502,10 @@ class SheetScene(QGraphicsScene):
 
     def rebuild(self):
         sel = next((k for k, b in self.boxes.items() if b.isSelected()), "")
+        sel_f = next((k for k, f in self.frames.items() if f.isSelected()), "")
         self.clear()
         self.texts, self.boxes = [], {}
+        self.frames, self.field_base, self.overflow = {}, {}, []
         W, H = L.paper_size(self.sheet.layout)
         self.W, self.H = W, H
         self.setSceneRect(0, 0, W, H)
@@ -355,6 +514,9 @@ class SheetScene(QGraphicsScene):
         self.set_design(self.design)
         if sel in self.boxes:
             self.boxes[sel].setSelected(True)
+        if sel_f in self.frames:
+            self.frames[sel_f].setSelected(True)
+            self.setFocusItem(self.frames[sel_f])       # حتى تبقى الأسهم تزيح النص بعد إعادة الرسم
 
     # ------------------------------------------------------------------ أدوات
     def _t(self, key, rect, size, bold=True, italic=False, underline=False, align=Qt.AlignHCenter,
@@ -363,10 +525,41 @@ class SheetScene(QGraphicsScene):
             return None
         text = self.sheet.edits.get(key, self.sheet.fields.get(key, "") if default is None else default)
         orig = self.sheet.fields.get(key, "") if default is None else default
-        it = EditText(self, key, text, rect, size, bold, italic, underline, align, valign, line_h)
+        stylable = L.is_stylable(key)
+        base, family, color = QRectF(rect), None, None
+        if stylable:
+            self.field_base[key] = {"size": float(size), "bold": bool(bold), "italic": bool(italic),
+                                    "underline": bool(underline), "align": _align_name(align),
+                                    "valign": _valign_name(valign), "line_h": float(line_h or 0.0),
+                                    "font": self.sheet.style.get("font") or "Arial", "color": "#000000",
+                                    "w": round(base.width(), 1), "h": round(base.height(), 1)}
+            stl = L.field_style(self.sheet.layout, key)
+            if stl:
+                size = float(stl.get("size") or size)
+                bold = bool(stl.get("bold", bold))
+                italic = bool(stl.get("italic", italic))
+                underline = bool(stl.get("underline", underline))
+                align = _ALIGN_Q.get(stl.get("align"), align)
+                valign = _VALIGN_Q.get(stl.get("valign"), valign)
+                line_h = float(stl.get("line_h") or line_h or 0.0)
+                family, color = stl.get("font") or None, stl.get("color") or None
+                if not L.field_class(key):          # الإزاحة والحيّز للنصوص المفردة فقط
+                    rect = QRectF(rect.x() + float(stl.get("dx") or 0), rect.y() + float(stl.get("dy") or 0),
+                                  float(stl.get("w") or rect.width()), float(stl.get("h") or rect.height()))
+        it = EditText(self, key, text, rect, size, bold, italic, underline, align, valign, line_h,
+                      family=family, color=color)
         it.original = orig
         self.addItem(it)
         self.texts.append(it)
+        if stylable:
+            fr = FieldFrame(self, key, QRectF(rect), base, movable=L.field_class(key) is None)
+            self.addItem(fr)
+            self.frames[key] = fr
+            if it.document().size().height() > rect.height() + 2.0 and any(
+                    k in L.field_style(self.sheet.layout, key) for k in ("w", "h", "size", "font", "line_h", "bold")):
+                lbl = L.field_label(key)                      # تنسيق اختاره المستخدم جعل النص أطول من حيّزه
+                if lbl not in self.overflow:
+                    self.overflow.append(lbl)
         return it
 
     def _rect(self, r: QRectF, w=0.8, fill=None, radius=0.0, color=None):
@@ -406,6 +599,8 @@ class SheetScene(QGraphicsScene):
         self.design = on
         for b in self.boxes.values():
             b.set_design(on)
+        for fr in self.frames.values():
+            fr.set_design(on)
         for it in self.items():
             if isinstance(it, TableHandle):
                 it.setVisible(on)
@@ -1012,6 +1207,9 @@ class PreviewDialog(QDialog):
             sc.request_edit_text.connect(lambda bid: self.design.edit_text(bid))
             sc.request_delete.connect(self.delete_box)
             sc.table_resize.connect(self._table_resized)
+            sc.selection_field.connect(self._field_selected)
+            sc.field_geometry.connect(self._field_moved)
+            sc.request_edit_field.connect(lambda k: self.design.edit_field_text(k))
             self.scenes[i] = sc
         return self.scenes[i]
 
@@ -1037,8 +1235,9 @@ class PreviewDialog(QDialog):
         self.design.setVisible(on)
         if on:
             self.design.sync()
-            self.hint.setText("وضع التصميم: «إضافة نص» ثم اسحبه إلى مكانه (يلتصق بالشبكة)، وانقر مرتين لكتابته. "
-                              "اسحب زاويته الزرقاء لتغيير حجمه. التعديلات للطباعة فقط حتى تحفظها في قالب.")
+            self.hint.setText("وضع التصميم: انقر على أي نص في الورقة لتحديده وتنسيقه من تبويب «النص»؛ اسحبه لإزاحته، "
+                              "واسحب زاويته لتغيير حيّزه، والأسهم تزيحه نقطة بنقطة. نصوص الجدول صنف واحد يتغيّر في كل "
+                              "الخانات. «إضافة نص» لنص حر جديد. التعديلات للطباعة فقط حتى تحفظها في قالب.")
         self.view.viewport().update()
 
     def apply_layout_change(self, fn, rebuild=True):
@@ -1113,8 +1312,37 @@ class PreviewDialog(QDialog):
         QTimer.singleShot(10, go)
 
     def _box_selected(self, bid: str):
-        if bid or not any(b.isSelected() for b in self.cur_scene().boxes.values()):
+        sc = self.cur_scene()
+        if bid or not (any(b.isSelected() for b in sc.boxes.values())
+                       or any(f.isSelected() for f in sc.frames.values())):
             self.design.select_box(bid)
+
+    # ---- نصوص القالب (الترويسة، العنوان، نصوص الجدول…)
+    def _field_selected(self, key: str):
+        sc = self.cur_scene()
+        if key:
+            self.design.select_field(key)
+        elif not (any(f.isSelected() for f in sc.frames.values()) or any(b.isSelected() for b in sc.boxes.values())):
+            self.design.select_field("")
+
+    def _field_moved(self, key: str, geo: dict):
+        self.apply_layout_change(lambda l: L.set_field_style(l, key, **geo))
+        self.design.select_field(key)
+
+    def select_field(self, key: str):
+        """تحديد نص القالب في الورقة (من قائمة «نصوص الورقة» في اللوحة)."""
+        from PySide6.QtCore import QTimer
+
+        def go():
+            sc = self.cur_scene()
+            fr = sc.frames.get(key) or next((f for k, f in sc.frames.items() if L.field_class(k) == key), None)
+            sc.clearSelection()
+            if fr is not None:
+                fr.setSelected(True)
+                sc.setFocusItem(fr)
+            else:
+                self.design.select_field(key)
+        QTimer.singleShot(10, go)
 
     def _box_moved(self, bid: str, geo: dict):
         def fn(l):
@@ -1171,6 +1399,7 @@ class PreviewDialog(QDialog):
             if keep_current and i == self.cur_index():
                 continue
             sh.layout, sh.layout_scopes = LL.effective(self.db, sh.kind, sh.level_id, sh.section_id)
+            sh.layout["cell_styles"] = LL.cell_styles(self.db, sh.kind, sh.target_id, sh.ws)
             self.saved_layouts[i] = self._json.dumps(sh.layout, sort_keys=True)
             self.undo_stack[i], self.redo_stack[i] = [], []
         self.scenes.clear()
@@ -1187,6 +1416,9 @@ class PreviewDialog(QDialog):
                 msgs.append(f"{sc.sheet.name}: حقول بلا قيمة: " + "، ".join(L.PLACEHOLDERS.get(m, m) for m in miss))
             if sc.hidden_with_data:
                 msgs.append(f"{sc.sheet.name}: حصص في المخفي لن تُطبع: " + "، ".join(sc.hidden_with_data))
+            if getattr(sc, "overflow", None):
+                msgs.append(f"{sc.sheet.name}: نص لا يتّسع في حيّزه وسيُقتطع أو يتراكب: "
+                            + "، ".join(dict.fromkeys(sc.overflow)))
         if not msgs:
             return True
         box = QMessageBox(QMessageBox.Warning, "قبل الطباعة",

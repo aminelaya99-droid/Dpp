@@ -107,6 +107,7 @@ class DesignPanel(QTabWidget):
         super().__init__()
         self.dlg = dlg
         self.box_id = ""
+        self.field_key = ""          # نص القالب المحدد (الترويسة، العنوان، نص من الجدول…)
         self._loading = False
         self.setMinimumWidth(410)
         self.setMaximumWidth(500)
@@ -243,14 +244,47 @@ class DesignPanel(QTabWidget):
         self.b_del.clicked.connect(lambda: self.dlg.delete_box(self.box_id))
         top.addWidget(self.b_del)
         v.addLayout(top)
-        self.box_hint = QLabel("انقر على نص حر في الورقة لتحديده، أو أضف نصاً جديداً. انقر مرتين على النص لكتابته.")
+        self.box_hint = QLabel("انقر على أي نص في الورقة لتحديده — نصوص القالب (الترويسة، العنوان، التوقيعات، نصوص "
+                               "الجدول) والنصوص الحرة — أو اختره من القائمة. انقر مرتين على النص لكتابته.")
         self.box_hint.setObjectName("Muted")
         self.box_hint.setWordWrap(True)
         v.addWidget(self.box_hint)
+        pick = QHBoxLayout()
+        pick.addWidget(QLabel("نصوص الورقة"))
+        self.field_pick = QComboBox()
+        self.field_pick.addItem("— اختر نصاً —", "")
+        for k, lab in L.FIELD_LABELS.items():
+            self.field_pick.addItem(lab, k)
+        self.field_pick.insertSeparator(self.field_pick.count())
+        for k, lab in L.CLASS_LABELS.items():
+            self.field_pick.addItem(f"{lab} (كل الخانات)", k)
+        self.field_pick.activated.connect(lambda _i: self.field_pick.currentData()
+                                          and self.dlg.select_field(self.field_pick.currentData()))
+        pick.addWidget(self.field_pick, 1)
+        v.addLayout(pick)
+        self.sel_lbl = QLabel("")
+        self.sel_lbl.setObjectName("SectionTitle")
+        self.sel_lbl.setWordWrap(True)
+        v.addWidget(self.sel_lbl)
+        fr = QHBoxLayout()
+        self.cell_only = QCheckBox("هذه الخانة فقط (لهذا الأسبوع)")
+        self.cell_only.setToolTip("بدون علامة: التنسيق يخص الصنف كله ويُحفظ في القالب.\n"
+                                  "بعلامة: يخص هذه الخانة وحدها، ويُحفظ مع ورقة هذا الأسبوع فقط.")
+        self.cell_only.toggled.connect(lambda _on: None if self._loading else self.select_field(self.field_key))
+        fr.addWidget(self.cell_only)
+        self.b_reset_f = QPushButton(icon("mdi6.restore"), "إرجاع إلى الأصل")
+        self.b_reset_f.setToolTip("يحذف تنسيق هذا النص فيرجع إلى شكله الأصلي (أو الموروث من القالب الأعم)")
+        self.b_reset_f.clicked.connect(self.reset_field)
+        fr.addWidget(self.b_reset_f)
+        fr.addStretch()
+        self.field_w = QWidget()
+        self.field_w.setLayout(fr)
+        v.addWidget(self.field_w)
         self.box_w = QWidget()
         f = QFormLayout(self.box_w)
         self.b_text = QPushButton(icon("mdi6.pencil"), "كتابة النص والحقول…")
-        self.b_text.clicked.connect(lambda: self.edit_text(self.box_id))
+        self.b_text.clicked.connect(lambda: self.edit_field_text(self.field_key) if self.field_key
+                                    else self.edit_text(self.box_id))
         f.addRow(self.b_text)
         ah = QHBoxLayout()
         self.align_grp = QButtonGroup(self)
@@ -319,6 +353,38 @@ class DesignPanel(QTabWidget):
         self.color = ColorButton("#000000", allow_none=False)
         self.color.on_change = lambda c: self.set_box(color=c)
         f.addRow("لون النص", self.color)
+        # ---- خاص بنصوص القالب: تباعد الأسطر، الإزاحة، حيّز النص
+        self.line_h = _spin(0, 3, 0, 0.05, 2)
+        self.line_h.setToolTip("0 = التباعد الأصلي")
+        self.line_h.valueChanged.connect(lambda val: self.set_field(line_h=(val or None)))
+        f.addRow("تباعد الأسطر", self.line_h)
+        oh = QHBoxLayout()
+        self.f_dx = _spin(-800, 800, 0, 1, 1)
+        self.f_dx.setToolTip("موجب = يميناً، سالب = يساراً (بالنقطة)")
+        self.f_dy = _spin(-800, 800, 0, 1, 1)
+        self.f_dy.setToolTip("موجب = أسفل، سالب = أعلى (بالنقطة)")
+        self.f_dx.valueChanged.connect(lambda val: self.set_field(dx=val))
+        self.f_dy.valueChanged.connect(lambda val: self.set_field(dy=val))
+        oh.addWidget(QLabel("أفقياً"))
+        oh.addWidget(self.f_dx)
+        oh.addWidget(QLabel("عمودياً"))
+        oh.addWidget(self.f_dy)
+        self.off_w = QWidget()
+        self.off_w.setLayout(oh)
+        f.addRow("الإزاحة", self.off_w)
+        gh = QHBoxLayout()
+        self.f_w = _spin(20, 1600, 200, 1, 1)
+        self.f_h = _spin(8, 1200, 20, 1, 1)
+        self.f_w.valueChanged.connect(lambda val: self.set_field(w=val))
+        self.f_h.valueChanged.connect(lambda val: self.set_field(h=val))
+        gh.addWidget(QLabel("العرض"))
+        gh.addWidget(self.f_w)
+        gh.addWidget(QLabel("الارتفاع"))
+        gh.addWidget(self.f_h)
+        self.geo_w = QWidget()
+        self.geo_w.setLayout(gh)
+        f.addRow("حيّز النص", self.geo_w)
+        self._form = f
         self.fill = ColorButton("")
         self.fill.on_change = lambda c: self.set_box(fill=c)
         f.addRow("خلفية", self.fill)
@@ -365,9 +431,44 @@ class DesignPanel(QTabWidget):
     def _box(self):
         return next((b for b in self.lay.get("boxes", []) if b["id"] == self.box_id), None)
 
+    # ---- صفوف خاصة بالنص الحر وأخرى خاصة بنصوص القالب
+    def _rows(self, widgets, show: bool):
+        for w in widgets:
+            w.setVisible(show)
+            lab = self._form.labelForField(w)
+            if lab is not None:
+                lab.setVisible(show)
+
+    def _mode(self, kind: str):
+        """kind: "" لا شيء، "box" نص حر، "field" نص قالب مفرد، "class" نص من الجدول."""
+        box, field, cls = kind == "box", kind == "field", kind == "class"
+        self._rows([self.fill, self.frame_w, self.frame_c, self.pad, self.rot, self.just_w], box)
+        self._rows([self.line_h], field or cls)
+        self._rows([self.off_w, self.geo_w], field)
+        self.field_w.setVisible(field or cls)
+        self.cell_only.setVisible(cls)
+        self.b_text.setVisible(box or field or cls)
+        for w in self.box_w.findChildren(QPushButton):
+            if w.text() in ("أفقي", "عمودي", "عمودي ↑", "عمودي ↓"):
+                w.setVisible(box)
+        for txt in ("توسيط في الورقة",):
+            for i in range(self._form.rowCount()):
+                it = self._form.itemAt(i, QFormLayout.LabelRole)
+                if it and it.widget() and it.widget().text() == txt:
+                    it.widget().setVisible(box)
+
     def select_box(self, bid: str):
+        if not bid and self.field_key:
+            return                      # إلغاء تحديد مربع لا يمسح نص القالب المحدد
         self.box_id = bid
         b = self._box()
+        if b:
+            self.field_key = ""
+            self.sel_lbl.setText("نص حر")
+            self._mode("box")
+        elif not self.field_key:
+            self.sel_lbl.setText("")
+            self._mode("")
         self.box_w.setEnabled(bool(b))
         self.b_dup.setEnabled(bool(b))
         self.b_del.setEnabled(bool(b))
@@ -394,7 +495,119 @@ class DesignPanel(QTabWidget):
         self._loading = False
         self.setCurrentIndex(1)
 
+    # ------------------------------------------------------------------ نصوص القالب
+    def select_field(self, key: str, switch: bool = True):
+        """تحميل خصائص نص من نصوص القالب (key مفتاح نص مفرد، أو مفتاح خانة، أو صنف cls:…)."""
+        switch = switch and key != self.field_key        # إعادة التحديد بعد إعادة الرسم لا تبدّل التبويب
+        self.field_key = key or ""
+        if not key:
+            if not self.box_id:
+                self.sel_lbl.setText("")
+                self.box_w.setEnabled(False)
+                self._mode("")
+            return
+        self.box_id = ""
+        self.b_dup.setEnabled(False)
+        self.b_del.setEnabled(False)
+        sc = self.dlg.cur_scene()
+        is_cls = key.startswith("cls:") or L.field_class(key) is not None
+        cell = is_cls and not key.startswith("cls:")           # خانة محددة بالنقر (لا من القائمة)
+        self._loading = True
+        if not cell:
+            self.cell_only.setChecked(False)
+        self.cell_only.setEnabled(cell)
+        only = cell and self.cell_only.isChecked()
+        base_key = key if key in sc.field_base else next(
+            (k for k in sc.field_base if L.field_class(k) == key), "")
+        base = dict(sc.field_base.get(base_key, {}))
+        if key.startswith("cls:"):
+            stl = dict((self.lay.get("field_styles") or {}).get(key) or {})
+        elif only or not is_cls:
+            stl = L.field_style(self.lay, key)
+        else:
+            stl = dict((self.lay.get("field_styles") or {}).get(L.field_class(key)) or {})
+        eff = {**base, **stl}
+        name = L.CLASS_LABELS.get(key) or L.field_label(key)
+        if is_cls:
+            self.sel_lbl.setText(f"نص الجدول · {name}" + (" — هذه الخانة فقط" if only else " — كل الخانات"))
+        else:
+            self.sel_lbl.setText(f"نص القالب · {name}")
+        self._mode("class" if is_cls else "field")
+        self.box_w.setEnabled(True)
+        for grp, k in ((self.align_grp, "align"), (self.valign_grp, "valign")):
+            for btn in grp.buttons():
+                btn.setChecked(btn.property("k") == eff.get(k))
+        self.font_cb.setCurrentFont(QFont(eff.get("font") or "Arial"))
+        self.size.setValue(float(eff.get("size") or 11))
+        self.bold.setChecked(bool(eff.get("bold")))
+        self.italic.setChecked(bool(eff.get("italic")))
+        self.under.setChecked(bool(eff.get("underline")))
+        self.color.set(eff.get("color") or "#000000")
+        self.line_h.setValue(float(eff.get("line_h") or 0))
+        self.f_dx.setValue(float(stl.get("dx") or 0))
+        self.f_dy.setValue(float(stl.get("dy") or 0))
+        self.f_w.setValue(float(stl.get("w") or base.get("w") or 200))
+        self.f_h.setValue(float(stl.get("h") or base.get("h") or 20))
+        self.b_reset_f.setEnabled(bool(stl))
+        i = self.field_pick.findData(key if (key.startswith("cls:") or not is_cls) else L.field_class(key))
+        self.field_pick.setCurrentIndex(max(0, i))
+        self._loading = False
+        if switch:
+            self.setCurrentIndex(1)
+
+    def set_field(self, **kv):
+        key = self.field_key
+        if not key or self._loading:
+            return
+        if key.startswith("cls:"):
+            def fn(l):
+                d = l.setdefault("field_styles", {}).setdefault(key, {})
+                for a, b in kv.items():
+                    if a not in L.STYLE_PROPS:
+                        continue
+                    if b is None:
+                        d.pop(a, None)
+                    else:
+                        d[a] = b
+                if not d:
+                    l["field_styles"].pop(key, None)
+        else:
+            only = self.cell_only.isChecked() and self.cell_only.isEnabled()
+
+            def fn(l):
+                L.set_field_style(l, key, cell_only=only, **kv)
+        self.change(fn)
+        self.b_reset_f.setEnabled(True)
+
+    def reset_field(self):
+        key = self.field_key
+        if not key:
+            return
+        if key.startswith("cls:"):
+            self.change(lambda l: (l.get("field_styles") or {}).pop(key, None))
+        else:
+            only = self.cell_only.isChecked() and self.cell_only.isEnabled()
+            self.change(lambda l: L.clear_field_style(l, key, cell_only=only))
+        self.select_field(key)
+
+    def edit_field_text(self, key: str):
+        """كتابة نص القالب (نقر مزدوج في وضع التصميم) — نفس أثر «تعديل على الورقة»."""
+        sc = self.dlg.cur_scene()
+        it = next((t for t in sc.texts if t.key == key), None)
+        if it is None:
+            return
+        d = TextDialog(self, it.toPlainText())
+        if d.exec() == QDialog.Accepted:
+            txt = d.text()
+            sc.text_edited(key, txt, txt != it.original)
+            self.dlg._rebuild_current() if self.dlg.doc is None else self.dlg._after_doc_change()
+
     def set_box(self, **kv):
+        if self.field_key and not self.box_id:
+            kv = {k: v for k, v in kv.items() if k in L.STYLE_PROPS}
+            if kv:
+                self.set_field(**kv)
+            return
         bid = self.box_id
         if not bid or self._loading:
             return
@@ -604,6 +817,8 @@ class DesignPanel(QTabWidget):
                              "كل الأوراق التي ترث هذا القالب ستُطبع بهذا الشكل."):
             return
         L.save(self.dlg.db, scope, sh.layout, sh.kind, sh.level_id, sh.section_id)
+        for s in self.dlg.sheets:                 # تنسيق «هذه الخانة فقط» يخص ورقة أسبوعها لا القالب
+            L.save_cell_styles(self.dlg.db, s.kind, s.target_id, s.ws, (s.layout or {}).get("cell_styles") or {})
         self.dlg.reload_layouts(keep_current=False)
         info(self, "حُفظ القالب.")
 
@@ -696,6 +911,8 @@ class DesignPanel(QTabWidget):
                                 if self.dlg.is_dirty() else ""))
         self._loading = False
         self.select_box(self.box_id if self._box() else "")
+        if self.field_key:                       # تحديث قيم نص القالب المحدد بعد إعادة الرسم
+            self.select_field(self.field_key, switch=False)
 
     def _toggle_hidden(self, key, j, visible):
         def fn(l):

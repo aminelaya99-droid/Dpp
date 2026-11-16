@@ -333,6 +333,7 @@ def _finish(db, kind, target_id, ws, level_id, values, periods, cells, name) -> 
     values = {"institution": db.get_setting("institution_name", "")} | values
     sec_id = target_id if kind == "section" else None
     lay, used = L.effective(db, kind, level_id, sec_id)
+    lay["cell_styles"] = L.cell_styles(db, kind, target_id, ws)      # تنسيق خانات هذا الأسبوع فقط
     return Sheet(kind=kind, target_id=target_id, ws=ws, scope=scope_of(kind, level_id), level_id=level_id,
                  raw=raw, values=values, fields={k: fill(v, values) for k, v in raw.items()},
                  days=list(DAY_NAMES), periods=[(p[0], f"{hm(p[1])} - {hm(p[2])}") for p in periods],
@@ -458,6 +459,34 @@ def safe_filename(s: str) -> str:
 
 
 # ------------------------------------------------------------------ تصدير Excel
+def _xl_style(sh: "Sheet", key: str, font_kw: dict, align):
+    """خط ومحاذاة Excel لنص من نصوص الورقة بعد تطبيق تنسيق المحرر.
+
+    Excel يأخذ من التنسيق: الخط، الحجم، غامق/مائل/تسطير، اللون والمحاذاة فقط (الإزاحة والحيّز خاصان بالورقة)."""
+    from openpyxl.styles import Alignment, Font
+    from . import layout as L
+    st = L.field_style(sh.layout, key)
+    kw = dict(font_kw)
+    if st.get("font"):
+        kw["name"] = st["font"]
+    if st.get("size"):
+        kw["size"] = float(st["size"])
+    for k in ("bold", "italic"):
+        if k in st:
+            kw[k] = bool(st[k])
+    if "underline" in st:
+        kw["underline"] = "single" if st["underline"] else None
+    col = str(st.get("color") or "").lstrip("#")
+    if len(col) == 6:
+        kw["color"] = col.upper()
+    if st.get("align") or st.get("valign"):
+        h = {"right": "right", "center": "center", "left": "left", "justify": "justify"}.get(
+            st.get("align"), align.horizontal)
+        v = {"top": "top", "middle": "center", "bottom": "bottom"}.get(st.get("valign"), align.vertical)
+        align = Alignment(horizontal=h, vertical=v, wrap_text=True)
+    return Font(**kw), align
+
+
 def to_xlsx(sheets: list[Sheet], path, show_room: bool = True, color: bool = False):
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -481,30 +510,33 @@ def to_xlsx(sheets: list[Sheet], path, show_room: bool = True, color: bool = Fal
         ws.page_setup.fitToHeight = 1
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ncol = len(sh.periods) + 1
-        f_b = Font(name=sh.style["font"], bold=True, size=sh.style["head_pt"])
+        fn = sh.style["font"]
+        kb = {"name": fn, "bold": True, "size": sh.style["head_pt"]}
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         right = Alignment(horizontal="right", vertical="top", wrap_text=True)
+        plain = Alignment(horizontal="right", vertical="center", wrap_text=False)
+
+        def put(row, col, text, key, kw=kb, al=center, border=None):
+            c = ws.cell(row, col, text)
+            c.font, c.alignment = _xl_style(sh, key, kw, al)
+            if border is not None:
+                c.border = border
+            return c
+
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
-        ws.cell(1, 1, sh.text("republic")).font = f_b
-        ws.cell(1, 1).alignment = center
-        ws.cell(2, 1, sh.text("right_block")).alignment = right
-        ws.cell(2, 1).font = f_b
+        put(1, 1, sh.text("republic"), "republic")
+        put(2, 1, sh.text("right_block"), "right_block", al=right)
         mid = max(2, ncol // 2)
-        ws.cell(2, mid, sh.text("center_block")).alignment = center
-        ws.cell(2, mid).font = Font(name=sh.style["font"], bold=True, size=sh.style["center_pt"])
-        ws.cell(2, ncol, sh.text("left_block") + "\n\n" + sh.text("approval")).alignment = right
-        ws.cell(2, ncol).font = f_b
+        put(2, mid, sh.text("center_block"), "center_block", {"name": fn, "bold": True, "size": sh.style["center_pt"]})
+        put(2, ncol, sh.text("left_block") + "\n\n" + sh.text("approval"), "left_block", al=right)
         ws.row_dimensions[2].height = 110
         r0 = 4
         ws.cell(r0, 1, "").border = box
         for j, (lab, tm) in enumerate(sh.periods):
-            c = ws.cell(r0, j + 2, f"{lab}\n{tm}")
-            c.font, c.alignment, c.border = f_b, center, box
+            put(r0, j + 2, f"{lab}\n{tm}", f"ph:{j}:time", border=box)
         ws.row_dimensions[r0].height = 30
         for di, dn in enumerate(sh.days):
-            c = ws.cell(r0 + 1 + di, 1, dn)
-            c.font = Font(name=sh.style["font"], bold=True, size=12)
-            c.alignment, c.border = center, box
+            put(r0 + 1 + di, 1, dn, f"day:{di}", {"name": fn, "bold": True, "size": 12}, border=box)
             ws.row_dimensions[r0 + 1 + di].height = 48
             for j in range(len(sh.periods)):
                 ws.cell(r0 + 1 + di, j + 2).border = box
@@ -521,20 +553,19 @@ def to_xlsx(sheets: list[Sheet], path, show_room: bool = True, color: bool = Fal
                 parts.append(cl.note)
             if cl.c1 > cl.c0:
                 ws.merge_cells(start_row=row, start_column=cl.c0 + 2, end_row=row, end_column=cl.c1 + 2)
-            c = ws.cell(row, cl.c0 + 2, "\n".join(parts))
-            c.font = Font(name=sh.style["font"], bold=True, italic=True, size=sh.style["title_pt"])
-            c.alignment = center
+            c = put(row, cl.c0 + 2, "\n".join(parts), key + ":title",
+                    {"name": fn, "bold": True, "italic": True, "size": sh.style["title_pt"]})
             if color and cl.color and cl.color.startswith("#") and len(cl.color) == 7:
                 h = cl.color[1:]
                 rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
                 light = "".join(f"{int(x + (255 - x) * 0.7):02X}" for x in rgb)
                 c.fill = PatternFill("solid", fgColor=light)
         foot = r0 + 2 + len(sh.days)
-        ws.cell(foot, 1, sh.text("note")).font = f_b
-        ws.cell(foot + 1, 1, sh.text("created"))
-        ws.cell(foot + 3, 1, sh.text("sign_right")).font = f_b
-        ws.cell(foot + 3, mid, sh.text("sign_center")).font = f_b
-        ws.cell(foot + 3, ncol, sh.text("sign_left")).font = f_b
+        put(foot, 1, sh.text("note"), "note", al=plain)
+        put(foot + 1, 1, sh.text("created"), "created", {"name": fn, "size": 9}, plain)
+        put(foot + 3, 1, sh.text("sign_right"), "sign_right", al=plain)
+        put(foot + 3, mid, sh.text("sign_center"), "sign_center", al=plain)
+        put(foot + 3, ncol, sh.text("sign_left"), "sign_left", al=plain)
         ws.column_dimensions["A"].width = 12
         for j in range(len(sh.periods)):
             ws.column_dimensions[openpyxl.utils.get_column_letter(j + 2)].width = 30
